@@ -32,7 +32,7 @@ def test_local_analysis_exports_and_delete():
  assert 'Аналитическая справка' in client.get(f'/api/jobs/{ident}/export/md').text
  excel=client.get(f'/api/jobs/{ident}/export/xlsx')
  wb=load_workbook(io.BytesIO(excel.content))
- assert wb.sheetnames==['Матрица','Требования','Опыт','Риски','Вопросы']
+ assert wb.sheetnames==['Матрица','Требования','Опыт','Риски','Вопросы','Ссылки']
  assert wb['Матрица'].max_row==4
  assert client.delete('/api/jobs/'+ident).status_code==200
  assert client.get('/api/jobs/'+ident).status_code==404
@@ -94,3 +94,131 @@ def test_excel_formula_is_text():
  cells=[c for row in wb['Матрица'] for c in row if c.value=='=HYPERLINK("http://example.com")']
  assert cells and cells[0].data_type=='s'
  app.jobs.pop('formula-test')
+
+
+def test_more_than_100_requirements_not_truncated():
+ p={**PAYLOAD,'proposal':'\n'.join(f'Метод номер {i}: анализ медицинских изображений на Python.' for i in range(160))}
+ result=app.analyze(p)
+ assert len(result['matrix'])==160
+ assert result['matrix'][-1]['req_id']=='R160'
+
+
+def test_application_evidence_and_links():
+ text='Проект: статистический анализ медицинских изображений в 2024 году.\nORCID: https://orcid.org/0000-0002-1825-0097\nКод: https://github.com/example/research'
+ result=app.analyze({**PAYLOAD,'application':text,'extra':'Дополнительно: подготовка наборов данных для машинного обучения.'})
+ assert any(e['source']=='заявка' for e in result['evidence'])
+ assert any(e['source']=='дополнительные материалы' for e in result['evidence'])
+ links=result['source_links']
+ assert any(x['url']=='https://github.com/example/research' and x['sources']==['заявка'] for x in links)
+ assert any(x['type']=='orcid' for x in links)
+ assert 'Ссылки из материалов' in result['report']
+
+
+def test_hidden_links_in_xlsx_and_docx():
+ from openpyxl import Workbook
+ wb=Workbook();ws=wb.active;ws['A1']='Google Scholar';ws['A1'].hyperlink='https://scholar.google.com/citations?user=abcdefghijkl'
+ ws['B1']='=HYPERLINK("https://example.org/publications", "Publications")'
+ b=io.BytesIO();wb.save(b)
+ r=client.post('/api/extract',files={'file':('application.xlsx',b.getvalue())})
+ assert r.status_code==200,r.text
+ assert len(r.json()['links'])==2
+ assert 'https://example.org/publications' in r.json()['text']
+ from docx import Document
+ from docx.oxml import OxmlElement
+ from docx.oxml.ns import qn
+ from docx.opc.constants import RELATIONSHIP_TYPE as RT
+ d=Document();p=d.add_paragraph('Научные профили: ')
+ rel=d.part.relate_to('https://orcid.org/0000-0002-1825-0097',RT.HYPERLINK,is_external=True)
+ h=OxmlElement('w:hyperlink');h.set(qn('r:id'),rel)
+ run=OxmlElement('w:r');t=OxmlElement('w:t');t.text='ORCID';run.append(t);h.append(run);p._p.append(h)
+ b=io.BytesIO();d.save(b)
+ r=client.post('/api/extract',files={'file':('application.docx',b.getvalue())})
+ assert r.status_code==200 and any(x['type']=='orcid' for x in r.json()['links'])
+
+
+def test_pdf_hidden_uri():
+ from pypdf import PdfWriter
+ from pypdf.annotations import Link
+ b=io.BytesIO();w=PdfWriter();w.add_blank_page(width=300,height=300)
+ w.add_annotation(0,Link(rect=(0,0,100,100),url='https://example.org/research'))
+ w.write(b)
+ r=client.post('/api/extract',files={'file':('application.pdf',b.getvalue())})
+ assert r.status_code==200,r.text
+ assert r.json()['links'][0]['url']=='https://example.org/research'
+
+
+def test_summary_matrix_not_used_as_evidence():
+ from openpyxl import Workbook
+ w=Workbook();w.active.append(['Кандидат','Поле','В заявке','В CV']);w.active.append(['C01','Google Scholar',1,0]);b=io.BytesIO();w.save(b)
+ r=client.post('/api/extract',files={'file':('summary.xlsx',b.getvalue())})
+ assert r.status_code==422 and 'сводка' in r.json()['detail']
+
+
+def test_ai_connect_and_check_without_leaking_key(monkeypatch):
+ from types import SimpleNamespace as N
+ monkeypatch.delenv('NEURAL_DEEP_API_KEY',raising=False)
+ monkeypatch.setenv('PROPOSAL_MODEL','test-model')
+ monkeypatch.setattr(app,'make_client',lambda key:N(models=N(list=lambda:N(data=[N(id='test-model')]))))
+ r=client.post('/api/ai/connect',json={'api_key':'test-private-value'})
+ assert r.status_code==200 and r.json()['models']==['test-model']
+ assert 'test-private-value' not in r.text
+ class Fake:
+  def __init__(self,**kwargs):pass
+  def json(self,*args):return {'answer':'OK'}
+ monkeypatch.setattr(app,'CheckedLLM',Fake)
+ r=client.post('/api/ai/check',json={'model':'test-model'})
+ assert r.status_code==200 and r.json()['ok']
+ assert client.post('/api/ai/connect',headers={'Origin':'https://attacker.example'},json={}).status_code==403
+ assert client.post('/api/ai/connect',data={'api_key':'bad'}).status_code==415
+
+
+def test_ai_error_is_actionable_and_redacted(monkeypatch):
+ import httpx,openai
+ request=httpx.Request('GET','https://api.neuraldeep.tech/v1/models')
+ def fail(key):
+  raise openai.AuthenticationError('secret=should-never-leak',response=httpx.Response(401,request=request),body=None)
+ monkeypatch.setattr(app,'make_client',fail)
+ r=client.post('/api/ai/connect',json={'api_key':'also-private'})
+ assert r.status_code==422 and '401' in r.text
+ assert 'should-never-leak' not in r.text and 'also-private' not in r.text
+
+
+def test_ai_json_fallback_and_fail_fast(monkeypatch):
+ from types import SimpleNamespace as N
+ import ai_service,openai,httpx
+ calls=[]
+ def completion(**kwargs):
+  calls.append(kwargs)
+  if len(calls)==1:
+   raise openai.BadRequestError('unsupported response_format',response=httpx.Response(400,request=httpx.Request('POST','https://api.neuraldeep.tech/v1/chat/completions')),body={'error':'unsupported response_format'})
+  return N(choices=[N(finish_reason='stop',message=N(content='{"answer":"OK"}'))],usage=None)
+ monkeypatch.setattr(ai_service,'make_client',lambda key:N(chat=N(completions=N(create=completion))))
+ llm=ai_service.CheckedLLM(api_key='unused',model='test')
+ value=llm.json('system','data',{'type':'object','required':['answer'],'properties':{'answer':{'type':'string'}}},'evidence_заявка')
+ assert value=={'answer':'OK'} and len(calls)==2
+ assert calls[0]['response_format']['json_schema']['name'].isascii()
+ calls.clear()
+ def unauthorized(**kwargs):
+  calls.append(kwargs)
+  raise openai.AuthenticationError('private',response=httpx.Response(401,request=httpx.Request('POST','https://api.neuraldeep.tech/v1/chat/completions')),body=None)
+ llm.client.chat.completions.create=unauthorized
+ with pytest.raises(ai_service.AIError,match='401'):llm.json('sys','user',{},'test')
+ assert len(calls)==1
+
+
+def test_ai_uses_application_as_separate_source(monkeypatch):
+ seen=[]
+ class Fake:
+  log=[]
+  def json(self,system,user,schema,name,**kwargs):
+   seen.append(user)
+   if name=='requirements':return dict(language='RU',requirements=[dict(summary_en='Python models',type='метод',importance='ключевое',stated='прямо',quote='Python и PyTorch',section='Метод')],missing=[],self_claims=[])
+   if name.startswith('evidence_'):return dict(language='RU',evidence=[dict(summary_en='Python models',type='проект',strength='проект',year='2024',quote='Python и PyTorch')],claimed_metrics=[])
+   if name=='matching':return dict(matches=[dict(req_id='R1',status='подтверждено',evidence_ids=['E2'],rationale='Из заявки',question='')])
+   return dict(summary='Справка',risks=[],questions=[])
+ monkeypatch.setattr(app,'CheckedLLM',Fake)
+ result=app.analyze({**PAYLOAD,'mode':'ai','application':'Заявка: Python и PyTorch. https://example.org/profile'})
+ assert result['evidence'][1]['source']=='заявка'
+ assert result['evidence'][1]['quote_verified']
+ assert result['matrix'][0]['status']=='подтверждено'
+ assert any('Документ кандидата (заявка)' in x for x in seen)
