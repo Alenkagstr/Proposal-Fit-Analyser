@@ -43,7 +43,8 @@ with sync_playwright() as p:
  page.route('**/api/jobs/mock-failed',lambda route: route.fulfill(json={'status':'error','stage':'Извлечение опыта CV','failed_stage':'Извлечение опыта CV','error':'Neural Deep не ответил вовремя.'}))
  page.click('#run');page.wait_for_selector('#progress-failure:not([hidden])')
  assert page.locator('#progress-error').is_visible()
- assert 'Извлечение опыта CV' in page.locator('#progress-error').inner_text()
+ assert page.locator('#progress-error').inner_text()=='Neural Deep не ответил за отведённое время запроса.'
+ assert page.locator('#stage').is_hidden()
  assert page.locator('#progress-spinner').is_hidden()
  page.click('#retry-analysis');page.wait_for_selector('#progress-failure:not([hidden])')
  page.screenshot(path=str(out/'error-mobile.png'),full_page=True)
