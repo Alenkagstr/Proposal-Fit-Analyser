@@ -176,11 +176,12 @@ async def ai_check(request: Request):
         if any(j['status']=='running' for j in jobs.values()): raise HTTPException(409,'Дождитесь завершения анализа.')
     def check():
         try:
+            started=time.monotonic()
             llm=CheckedLLM(model=data['model'])
             schema={'type':'object','additionalProperties':False,'required':['answer'],'properties':{'answer':{'type':'string'}}}
             llm.json('Проверка структурированного ответа.','Верни объект с полем answer и строкой OK.',schema,'connection_test')
             os.environ['PROPOSAL_MODEL']=data['model']
-            return dict(ok=True,model=data['model'],message='AI отвечает в JSON. Можно запускать анализ документов.')
+            return dict(ok=True,model=data['model'],message=f'AI отвечает в JSON за {time.monotonic()-started:.1f} с. Модель: {data["model"]}. Можно запускать анализ документов.')
         except Exception as exc: raise HTTPException(422,safe_error(exc)) from None
     return await run_in_threadpool(check)
 
@@ -217,7 +218,7 @@ async def start(request: Request):
             if time.time()-jobs[k]['created']>3600 and jobs[k]['status']!='running': del jobs[k]
         if any(j['status']=='running' for j in jobs.values()): raise HTTPException(429,'Другой анализ ещё выполняется. Дождитесь его завершения.')
         if len(jobs)>=20: raise HTTPException(429,'Лимит сессий достигнут. Удалите предыдущие результаты или перезапустите сервер.')
-        ident=uuid.uuid4().hex; jobs[ident]={'status':'running','stage':'Подготовка материалов','created':time.time()}
+        ident=uuid.uuid4().hex; jobs[ident]={'status':'running','stage':'Подготовка материалов','model':os.getenv('PROPOSAL_MODEL',DEFAULT_MODEL) if p['mode']=='ai' else '', 'created':time.time()}
     def run():
         try:
             result=analyze(p,lambda s: jobs[ident].update(stage=s))

@@ -191,13 +191,15 @@ def test_ai_json_fallback_and_fail_fast(monkeypatch):
  def completion(**kwargs):
   calls.append(kwargs)
   if len(calls)==1:
-   raise openai.BadRequestError('unsupported response_format',response=httpx.Response(400,request=httpx.Request('POST','https://api.neuraldeep.tech/v1/chat/completions')),body={'error':'unsupported response_format'})
+   return N(choices=[N(finish_reason='stop',message=N(content='not JSON'))],usage=None)
   return N(choices=[N(finish_reason='stop',message=N(content='{"answer":"OK"}'))],usage=None)
  monkeypatch.setattr(ai_service,'make_client',lambda key:N(chat=N(completions=N(create=completion))))
  llm=ai_service.CheckedLLM(api_key='unused',model='test')
  value=llm.json('system','data',{'type':'object','required':['answer'],'properties':{'answer':{'type':'string'}}},'evidence_заявка')
  assert value=={'answer':'OK'} and len(calls)==2
- assert calls[0]['response_format']['json_schema']['name'].isascii()
+ assert 'response_format' not in calls[0]
+ assert calls[1]['response_format']=={'type':'json_object'}
+ assert 'required' in calls[0]['messages'][0]['content']
  calls.clear()
  def unauthorized(**kwargs):
   calls.append(kwargs)
@@ -256,7 +258,7 @@ def test_ai_deadline_and_timeout_no_retry(monkeypatch):
   raise openai.APITimeoutError(request=httpx.Request('POST','https://api.neuraldeep.tech/v1/chat/completions'))
  monkeypatch.setattr(ai_service,'make_client',lambda key:N(chat=N(completions=N(create=slow))))
  llm=ai_service.CheckedLLM(api_key='unused')
- with pytest.raises(ai_service.AIError,match='время запроса'):
+ with pytest.raises(ai_service.AIError,match='Тайм-аут ожидания ответа'):
   llm.json('system','user',{},'requirements')
  assert len(calls)==1 and 0<calls[0]['timeout']<=180
  llm.deadline=0
@@ -288,3 +290,28 @@ def test_optional_models_failure_keeps_manual_configuration(monkeypatch):
  monkeypatch.setattr(app,'CheckedLLM',Check)
  monkeypatch.setenv('PROPOSAL_MODEL','previous-model')
  assert client.post('/api/ai/check',json={'model':'qwen3.6-35b-a3b'}).status_code==200
+
+
+def test_real_sdk_plain_request_and_timeout_diagnostics(monkeypatch):
+ import ai_service,openai,httpx,json
+ requests=[]
+ def respond(request):
+  requests.append(json.loads(request.content))
+  return httpx.Response(200,json={'id':'chat-test','object':'chat.completion','created':0,'model':'qwen3.6-35b-a3b','choices':[{'index':0,'finish_reason':'stop','message':{'role':'assistant','content':'{"answer":"OK"}'}}]})
+ with openai.OpenAI(api_key='private-test-key',base_url='https://api.neuraldeep.tech/v1',http_client=httpx.Client(transport=httpx.MockTransport(respond))) as sdk:
+  monkeypatch.setattr(ai_service,'make_client',lambda key:sdk)
+  llm=ai_service.CheckedLLM()
+  assert llm.json('sys','doc',{'type':'object','required':['answer'],'properties':{'answer':{'type':'string'}}},'requirements')=={'answer':'OK'}
+ assert len(requests)==1
+ assert 'response_format' not in requests[0]
+ assert requests[0]['model']=='qwen3.6-35b-a3b'
+ assert 'required' in requests[0]['messages'][0]['content']
+ for timeout,label in [(httpx.ConnectTimeout,'соединения'),(httpx.ReadTimeout,'ожидания ответа'),(httpx.WriteTimeout,'отправки')]:
+  def fail(request):raise timeout('private-test-key and private-document',request=request)
+  with openai.OpenAI(api_key='private-test-key',max_retries=0,http_client=httpx.Client(transport=httpx.MockTransport(fail))) as sdk:
+   monkeypatch.setattr(ai_service,'make_client',lambda key:sdk)
+   with pytest.raises(ai_service.AIError) as caught:
+    ai_service.CheckedLLM().json('sys','private-document',{},'requirements')
+   message=str(caught.value)
+   assert label in message and 'Формат: text' in message
+   assert 'private-test-key' not in message and 'private-document' not in message
