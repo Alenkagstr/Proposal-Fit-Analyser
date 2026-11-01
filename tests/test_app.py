@@ -160,7 +160,8 @@ def test_ai_connect_and_check_without_leaking_key(monkeypatch):
  monkeypatch.setenv('PROPOSAL_MODEL','test-model')
  monkeypatch.setattr(app,'make_client',lambda key:N(models=N(list=lambda:N(data=[N(id='test-model')]))))
  r=client.post('/api/ai/connect',json={'api_key':'test-private-value'})
- assert r.status_code==200 and r.json()['models']==['test-model']
+ assert r.status_code==200 and r.json()['models']==[]
+ assert r.json()['model']=='test-model'
  assert 'test-private-value' not in r.text
  class Fake:
   def __init__(self,**kwargs):pass
@@ -177,8 +178,8 @@ def test_ai_error_is_actionable_and_redacted(monkeypatch):
  request=httpx.Request('GET','https://api.neuraldeep.tech/v1/models')
  def fail(key):
   raise openai.AuthenticationError('secret=should-never-leak',response=httpx.Response(401,request=request),body=None)
- monkeypatch.setattr(app,'make_client',fail)
- r=client.post('/api/ai/connect',json={'api_key':'also-private'})
+ monkeypatch.setattr(app,'CheckedLLM',lambda **kwargs:fail('unused'))
+ r=client.post('/api/ai/check',json={'model':'test-model'})
  assert r.status_code==422 and '401' in r.text
  assert 'should-never-leak' not in r.text and 'also-private' not in r.text
 
@@ -222,3 +223,68 @@ def test_ai_uses_application_as_separate_source(monkeypatch):
  assert result['evidence'][1]['quote_verified']
  assert result['matrix'][0]['status']=='подтверждено'
  assert any('Документ кандидата (заявка)' in x for x in seen)
+
+
+def test_connect_does_not_request_models(monkeypatch):
+ from types import SimpleNamespace as N
+ def forbidden(): raise AssertionError('models must be optional')
+ monkeypatch.setattr(app,'make_client',lambda key:N(models=N(list=forbidden)))
+ monkeypatch.setenv('NEURAL_DEEP_API_KEY','old')
+ r=client.post('/api/ai/connect',json={'api_key':'new-private'})
+ assert r.status_code==200 and 'new-private' not in r.text
+ assert app.os.environ['NEURAL_DEEP_API_KEY']=='new-private'
+
+
+def test_job_error_preserves_failed_stage(monkeypatch):
+ def fail(payload,update):
+  update('Извлечение опыта CV')
+  raise app.AIError('Neural Deep не ответил вовремя.')
+ monkeypatch.setattr(app,'analyze',fail)
+ r=client.post('/api/analyze',json=PAYLOAD)
+ j=wait_result(r.json()['id'])
+ assert j['status']=='error' and j['failed_stage']=='Извлечение опыта CV'
+ assert 'не ответил' in j['error']
+ client.delete('/api/jobs/'+r.json()['id'])
+
+
+def test_ai_deadline_and_timeout_no_retry(monkeypatch):
+ import ai_service,openai,httpx
+ from types import SimpleNamespace as N
+ calls=[]
+ def slow(**kwargs):
+  calls.append(kwargs)
+  raise openai.APITimeoutError(request=httpx.Request('POST','https://api.neuraldeep.tech/v1/chat/completions'))
+ monkeypatch.setattr(ai_service,'make_client',lambda key:N(chat=N(completions=N(create=slow))))
+ llm=ai_service.CheckedLLM(api_key='unused')
+ with pytest.raises(ai_service.AIError,match='время запроса'):
+  llm.json('system','user',{},'requirements')
+ assert len(calls)==1 and 0<calls[0]['timeout']<=180
+ llm.deadline=0
+ with pytest.raises(ai_service.AIError,match='10 минут'):
+  llm.json('system','user',{},'requirements')
+ assert len(calls)==1
+
+
+def test_optional_models_failure_keeps_manual_configuration(monkeypatch):
+ import openai,httpx
+ from types import SimpleNamespace as N
+ def fail():
+  raise openai.APITimeoutError(request=httpx.Request('GET','https://api.neuraldeep.tech/v1/models'))
+ class Fake:
+  def __enter__(self):return self
+  def __exit__(self,*args):pass
+  def with_options(self,**kwargs):
+   assert kwargs['timeout']==10
+   return self
+  models=N(list=fail)
+ monkeypatch.setattr(app,'make_client',lambda:Fake())
+ monkeypatch.setenv('NEURAL_DEEP_API_KEY','existing-private')
+ r=client.get('/api/ai/models')
+ assert r.status_code==422 and 'existing-private' not in r.text
+ assert app.os.environ['NEURAL_DEEP_API_KEY']=='existing-private'
+ class Check:
+  def __init__(self,**kwargs):assert kwargs['model']=='qwen3.6-35b-a3b'
+  def json(self,*args):return {'answer':'OK'}
+ monkeypatch.setattr(app,'CheckedLLM',Check)
+ monkeypatch.setenv('PROPOSAL_MODEL','previous-model')
+ assert client.post('/api/ai/check',json={'model':'qwen3.6-35b-a3b'}).status_code==200

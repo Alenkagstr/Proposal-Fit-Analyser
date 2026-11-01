@@ -36,6 +36,43 @@ with sync_playwright() as p:
  page.wait_for_function("document.querySelector('#cv').value.startsWith('Python:')")
  page.click('#nav-result') if page.locator('#nav-result').is_visible() else page.evaluate("document.querySelector('#nav-result').click()")
  page.click('#delete');page.wait_for_function("document.querySelector('#cv').value === ''")
+ # Fail centrally, retry without losing any document, then return to edit.
+ page.click('#demo');page.fill('#application','Заявка: научный проект Python, исходные данные сохранены.')
+ original=page.locator('#cv').input_value()
+ page.route('**/api/analyze',lambda route: route.fulfill(status=202,json={'id':'mock-failed'}))
+ page.route('**/api/jobs/mock-failed',lambda route: route.fulfill(json={'status':'error','stage':'Извлечение опыта CV','failed_stage':'Извлечение опыта CV','error':'Neural Deep не ответил вовремя.'}))
+ page.click('#run');page.wait_for_selector('#progress-failure:not([hidden])')
+ assert page.locator('#progress-error').is_visible()
+ assert 'Извлечение опыта CV' in page.locator('#progress-error').inner_text()
+ assert page.locator('#progress-spinner').is_hidden()
+ page.click('#retry-analysis');page.wait_for_selector('#progress-failure:not([hidden])')
+ page.screenshot(path=str(out/'error-mobile.png'),full_page=True)
+ page.click('#progress-back')
+ assert page.locator('#cv').input_value()==original
+ assert 'исходные данные сохранены' in page.locator('#application').input_value()
+ # A failed poll resumes the existing job instead of submitting it again.
+ page.route('**/api/jobs/mock-failed',lambda route: route.abort())
+ page.click('#run');page.wait_for_selector('#progress-failure:not([hidden])')
+ page.unroute('**/api/analyze')
+ page.route('**/api/analyze',lambda route: (_ for _ in ()).throw(AssertionError('duplicate analysis')))
+ page.click('#retry-analysis');page.wait_for_selector('#progress-failure:not([hidden])')
+ page.click('#progress-back')
+ page.clock.install()
+ page.evaluate("""() => {
+  const originalFetch=window.fetch;
+  window.fetch=(url,options={})=>String(url).includes('/api/jobs/mock-failed')
+   ? new Promise((resolve,reject)=>options.signal.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError')),{once:true}))
+   : originalFetch(url,options);
+ }""")
+ page.unroute('**/api/analyze')
+ page.route('**/api/analyze',lambda route: route.fulfill(status=202,json={'id':'mock-failed'}))
+ page.click('#run')
+ page.wait_for_timeout(200)
+ page.clock.run_for(15001)
+ page.wait_for_selector('#progress-failure:not([hidden])')
+ assert 'не ответил вовремя' in page.locator('#progress-error').inner_text()
+ assert page.locator('#cv').input_value()==original
  assert not errors, errors
- print('Browser checks passed: demo, 6 rows, quotes, filters, risks/questions, report, XLSX download, upload, delete, 390px layout; no JS errors; application links and AI settings flow (mocked provider).')
+ print('Browser checks passed: demo, 6 rows, quotes, filters, risks/questions, report, XLSX download, upload, delete, 390px layout; central failure, retry, preserved documents and poll recovery; no JS errors; AI settings (mocked provider).')
+ page.unroute_all(behavior='ignoreErrors')
  browser.close()

@@ -85,10 +85,17 @@ def analyze(payload, update=lambda s: None):
     if payload.get('profiles'): texts['идентификаторы']=payload['profiles']
     update('Извлечение требований и опыта')
     if payload['mode']=='ai':
-        llm=CheckedLLM(); info=core.extract_requirements(llm,proposal)
+        llm=CheckedLLM()
+        update('Извлечение требований Proposal')
+        info=core.extract_requirements(llm,proposal)
         if not info['requirements']: raise ValueError('Модель не выделила требований. Уточните Proposal.')
+        update('Извлечение опыта CV')
         cv=core.extract_evidence(llm,texts['CV'],'CV')
-        extra_blocks=[core.extract_evidence(llm,text,source) for source,text in texts.items() if source not in ('CV','идентификаторы')]
+        extra_blocks=[]
+        for source,text in texts.items():
+            if source not in ('CV','идентификаторы'):
+                update('Извлечение опыта: '+source)
+                extra_blocks.append(core.extract_evidence(llm,text,source))
         extra=dict(evidence=[e for block in extra_blocks for e in block['evidence']],claimed_metrics=[m for block in extra_blocks for m in block['claimed_metrics']])
         ev=core.build_evidence_table(cv,extra,info['self_claims'],[])
         update('Сопоставление требований с доказательствами')
@@ -114,7 +121,7 @@ def analyze(payload, update=lambda s: None):
 def index(): return FileResponse(ROOT/'static/index.html',headers={'Cache-Control':'no-cache'})
 
 @app.get('/api/health')
-def health(): return {'ok':True,'ai_available':bool(os.getenv('NEURAL_DEEP_API_KEY','').strip()),'model':os.getenv('PROPOSAL_MODEL','qwen3.8-27b-noreason')}
+def health(): return {'ok':True,'ai_available':bool(os.getenv('NEURAL_DEEP_API_KEY','').strip()),'model':os.getenv('PROPOSAL_MODEL',DEFAULT_MODEL)}
 
 async def ai_request(request):
     # Reject cross-origin requests to the local credential/configuration endpoints.
@@ -141,20 +148,30 @@ async def ai_connect(request: Request):
     def connect():
         try:
             key=data.get('api_key','').strip() or os.getenv('NEURAL_DEEP_API_KEY','')
-            models=sorted({m.id for m in make_client(key).models.list().data})
-            if not models: raise AIError('Провайдер не вернул доступных моделей. Проверьте тариф аккаунта.')
+            # Saving a key must not depend on the optional /models endpoint.
+            if not key.strip(): raise AIError('Введите ключ Neural Deep или задайте NEURAL_DEEP_API_KEY в .env.')
             os.environ['NEURAL_DEEP_API_KEY']=key
             selected=os.getenv('PROPOSAL_MODEL',DEFAULT_MODEL)
-            return dict(models=models,model=selected if selected in models else '',message='Ключ принят. Выберите модель и проверьте AI. Ключ хранится только до остановки сервера.')
+            return dict(models=[],model=selected,message='Ключ сохранён. Введите модель и проверьте AI. Список моделей необязателен.')
         except Exception as exc:
             raise HTTPException(422,safe_error(exc)) from None
     return await run_in_threadpool(connect)
+
+@app.get('/api/ai/models')
+async def ai_models():
+    from starlette.concurrency import run_in_threadpool
+    def load():
+        try:
+            with make_client().with_options(timeout=10) as client:
+                return {'models':sorted({m.id for m in client.models.list().data})}
+        except Exception as exc: raise HTTPException(422,safe_error(exc)) from None
+    return await run_in_threadpool(load)
 
 @app.post('/api/ai/check')
 async def ai_check(request: Request):
     from starlette.concurrency import run_in_threadpool
     data=await ai_request(request)
-    if not data.get('model','').strip(): raise HTTPException(422,'Выберите модель из списка.')
+    if not data.get('model','').strip(): raise HTTPException(422,'Введите название модели.')
     with lock:
         if any(j['status']=='running' for j in jobs.values()): raise HTTPException(409,'Дождитесь завершения анализа.')
     def check():
@@ -207,7 +224,7 @@ async def start(request: Request):
             jobs[ident].update(status='done',result=result)
         except Exception as e:
             msg=str(e) if isinstance(e,ValueError) else safe_error(e)
-            jobs[ident].update(status='error',error=msg)
+            jobs[ident].update(status='error',error=msg,failed_stage=jobs[ident]['stage'])
     pool.submit(run)
     return {'id':ident}
 

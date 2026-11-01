@@ -1,6 +1,13 @@
 const $=id=>document.getElementById(id);
 let result=null,jobId=null,busy=false,aiReady=false;
+let pendingPayload=null,resumeJob=false;
 const uploadedLinks={};
+async function boundedFetch(url,options={},timeout=15000){
+ const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),timeout);
+ try{const response=await fetch(url,{...options,signal:controller.signal});const data=await response.json();return {response,data};}
+ catch(e){if(e.name==='AbortError')throw Error('Сервер не ответил вовремя. Проверьте соединение и повторите.');throw e;}
+ finally{clearTimeout(timer);}
+}
 const statuses=['подтверждено','частично подтверждено','не найдено в материалах','требует экспертной проверки'];
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function error(message){$('error').textContent=message;$('error').hidden=!message;}
@@ -34,6 +41,7 @@ $('mode').onchange=()=>{
 };
 fetch('/api/health').then(r=>r.json()).then(d=>{
  aiReady=d.ai_available;
+ $('ai-model').value=d.model;
  $('ai-status').textContent=aiReady?'Ключ настроен · '+d.model:'Ключ не настроен';
  if(aiReady){$('ai-option').textContent='AI-анализ · '+d.model;$('mode').value='ai';$('mode').dispatchEvent(new Event('change'));}
  else $('ai-settings').open=true;
@@ -42,8 +50,7 @@ async function aiAction(path,payload){
  $('ai-message').textContent='Проверяем соединение с Neural Deep…';
  $('ai-connect').disabled=$('ai-check').disabled=true;
  try{
-  const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-  const data=await response.json();if(!response.ok)throw Error(data.detail||'Не удалось проверить AI.');
+  const {response,data}=await boundedFetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)},195000);if(!response.ok)throw Error(data.detail||'Не удалось проверить AI.');
   $('ai-message').textContent=data.message;return data;
  }catch(e){$('ai-message').textContent=e.message;return null;}
  finally{$('ai-key').value='';$('ai-connect').disabled=$('ai-check').disabled=false;}
@@ -51,7 +58,7 @@ async function aiAction(path,payload){
 $('ai-connect').onclick=async()=>{
  const data=await aiAction('/api/ai/connect',{api_key:$('ai-key').value});if(!data)return;
  aiReady=false;
- $('ai-model').replaceChildren(new Option('Выберите доступную модель',''),...data.models.map(m=>new Option(m,m)));
+ $('ai-models').replaceChildren(...data.models.map(m=>new Option(m,m)));
  $('ai-model').value=data.model;
  $('ai-status').textContent='Ключ принят · проверьте модель';
 };
@@ -60,14 +67,48 @@ $('ai-check').onclick=async()=>{
  aiReady=true;$('ai-status').textContent='AI проверен · '+data.model;$('ai-option').textContent='AI-анализ · '+data.model;
  $('mode').value='ai';$('mode').dispatchEvent(new Event('change'));error('');
 };
-$('analysis-form').onsubmit=async e=>{
- e.preventDefault();if(busy)return;if($('mode').value==='ai'&&!aiReady){$('ai-settings').open=true;error('Подключите Neural Deep и нажмите «Проверить AI».');$('ai-settings').scrollIntoView({behavior:'smooth'});return;}busy=true;$('run').disabled=true;view('progress');
- try{
-  const payload={};for(const k of ['cv','proposal','application','extra','candidate','profiles','mode'])payload[k]=$(k).value;
-  const response=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const data=await response.json();if(!response.ok)throw Error(data.detail||'Ошибка анализа.');jobId=data.id;
-  while(true){const r=await fetch('/api/jobs/'+jobId);const j=await r.json();if(!r.ok)throw Error(j.detail||'Результат недоступен.');$('stage').textContent=j.stage;if(j.status==='error')throw Error(j.error);if(j.status==='done'){result=j.result;render();view('result');break;}await new Promise(resolve=>setTimeout(resolve,1200));}
- }catch(e){view('input');error(e.message);}finally{busy=false;$('run').disabled=false;}
+$('ai-load-models').onclick=async()=>{
+ $('ai-load-models').disabled=true;
+ try{const {response,data}=await boundedFetch('/api/ai/models');if(!response.ok)throw Error(data.detail);$('ai-models').replaceChildren(...data.models.map(m=>new Option(m,m)));$('ai-message').textContent='Подсказки моделей обновлены. Можно ввести название вручную.';}
+ catch(e){$('ai-message').textContent='Список недоступен. Введите модель вручную. '+e.message;}
+ finally{$('ai-load-models').disabled=false;}
 };
+async function runAnalysis(retry=false){
+ if(busy)return;
+ if(!retry){
+  if($('mode').value==='ai'&&!aiReady){$('ai-settings').open=true;error('Подключите Neural Deep и нажмите «Проверить AI».');return;}
+  pendingPayload={};for(const k of ['cv','proposal','application','extra','candidate','profiles','mode'])pendingPayload[k]=$(k).value;
+  resumeJob=false;
+ }
+ busy=true;$('run').disabled=true;view('progress');
+ $('progress-failure').hidden=true;$('progress-spinner').hidden=false;$('progress-note').hidden=false;
+ $('progress-title').textContent='Соединяем факты';
+ if(!resumeJob)$('stage').textContent='Подготовка материалов';
+ const deadline=Date.now()+630000;
+ try{
+  if(!resumeJob){
+   const {response,data}=await boundedFetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(pendingPayload)});
+   if(!response.ok)throw Error(data.detail||'Ошибка анализа.');jobId=data.id;resumeJob=true;
+  }
+  while(Date.now()<deadline){
+   const {response:r,data:j}=await boundedFetch('/api/jobs/'+jobId,{},Math.min(15000,deadline-Date.now()));
+   if(!r.ok){if(r.status===404)resumeJob=false;throw Error(j.detail||'Результат недоступен.');}
+   $('stage').textContent=j.failed_stage||j.stage;
+   if(j.status==='error'){resumeJob=false;throw Error(j.error);}
+   if(j.status==='done'){resumeJob=false;result=j.result;render();view('result');return;}
+   await new Promise(resolve=>setTimeout(resolve,1200));
+  }
+  throw Error('Превышено время ожидания анализа. Повтор проверит состояние уже запущенного анализа.');
+ }catch(e){
+  $('progress-spinner').hidden=true;$('progress-note').hidden=true;$('progress-title').textContent='Анализ не завершён';
+  $('progress-error').textContent='Этап: '+$('stage').textContent+'. '+e.message;
+  $('progress-failure').hidden=false;
+ }finally{busy=false;$('run').disabled=false;}
+}
+$('analysis-form').onsubmit=e=>{e.preventDefault();runAnalysis();};
+$('retry-analysis').onclick=()=>runAnalysis(true);
+$('progress-back').onclick=()=>view('input');
+
 function matrix(){const wanted=$('filter').value;const rows=result.matrix.filter(m=>wanted==='all'||m.status===wanted);$('matrix-body').innerHTML=rows.length?rows.map(m=>`<tr><td><small>${esc(m.req_id)} · ${esc(m.type)} · ${esc(m.importance)} · ${esc(m.stated)}</small><strong>${esc(m.requirement)}</strong><div class="source-quote">«${esc(m.quote)}»</div></td><td><span class="status s${statuses.indexOf(m.status)}">${esc(m.status)}</span></td><td>${esc(m.rationale)}${m.auto_check?`<p class="hint">Проверка: ${esc(m.auto_check)}</p>`:''}${m.evidence_ids.length?`<details><summary>Доказательства · ${m.evidence_ids.length}</summary>${m.evidence_ids.map(id=>{const ev=result.evidence.find(x=>x.id===id);return ev?`<blockquote><strong>${esc(ev.id)} · ${esc(ev.source)} · ${esc(ev.strength)}</strong><p>«${esc(ev.quote)}»</p><small>${ev.quote_verified?'Цитата найдена в документе':'Цитату необходимо проверить'}</small></blockquote>`:'';}).join('')}</details>`:'<p class="hint">Подтверждение в материалах не найдено</p>'}</td></tr>`).join(''):'<tr><td colspan="3">Нет требований с выбранным статусом.</td></tr>';}
 function render(){
  $('nav-result').disabled=false;$('result-candidate').textContent=result.candidate+' · '+result.matrix.length+' требований';
