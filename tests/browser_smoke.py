@@ -73,6 +73,22 @@ with sync_playwright() as p:
  page.wait_for_selector('#progress-failure:not([hidden])')
  assert 'не ответил вовремя' in page.locator('#progress-error').inner_text()
  assert page.locator('#cv').input_value()==original
+ page.click('#progress-back')
+ page.locator('#ai-settings').evaluate('(element)=>element.open=true')
+ assert page.locator('#ai-model').evaluate('(element)=>element.tagName')=='SELECT'
+ assert page.locator('#ai-load-models').count()==0
+ page.screenshot(path=str(out/'ai-settings-mobile.png'),full_page=True)
+ page.evaluate("""() => {
+  const originalFetch=window.fetch;
+  window.fetch=(url,options={})=>String(url).includes('/api/ai/check')
+   ? new Promise((resolve,reject)=>options.signal.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError')),{once:true}))
+   : originalFetch(url,options);
+ }""")
+ page.click('#ai-check')
+ page.clock.run_for(45001)
+ page.wait_for_function("document.querySelector('#ai-message').textContent.includes('Сервер не ответил вовремя')")
+ assert page.locator('#ai-check').is_enabled()
+ assert page.locator('#cv').input_value()==original
  assert not errors, errors
  print('Browser checks passed: demo, 6 rows, quotes, filters, risks/questions, report, XLSX download, upload, delete, 390px layout; central failure, retry, preserved documents and poll recovery; no JS errors; AI settings (mocked provider).')
  page.unroute_all(behavior='ignoreErrors')

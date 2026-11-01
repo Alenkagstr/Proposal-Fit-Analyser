@@ -39,39 +39,39 @@ $('mode').onchange=()=>{
  $('mode-note').textContent=$('mode').value==='ai'?'Требования → опыт CV и заявки → сопоставление → справка. Тексты отправляются Neural Deep.':'Поиск текстовых совпадений без лимита в 100 пунктов. Компетенции проверяет эксперт.';
  if($('mode').value==='ai'&&!aiReady){$('ai-settings').open=true;$('ai-message').textContent='Сначала подключите ключ и проверьте выбранную модель. Анализ не будет подменён локальным режимом.';}
 };
+function selectModel(model){
+ const select=$('ai-model');
+ if(model&&!Array.from(select.options).some(option=>option.value===model))select.add(new Option(model,model));
+ select.value=model||'qwen3.6-35b-a3b';
+}
 fetch('/api/health').then(r=>r.json()).then(d=>{
  aiReady=d.ai_available;
- $('ai-model').value=d.model;
+ selectModel(d.model);
  $('ai-status').textContent=aiReady?'Ключ настроен · '+d.model:'Ключ не настроен';
  if(aiReady){$('ai-option').textContent='AI-анализ · '+d.model;$('mode').value='ai';$('mode').dispatchEvent(new Event('change'));}
  else $('ai-settings').open=true;
 }).catch(()=>error('Сервер недоступен. Проверьте, что приложение запущено.'));
 async function aiAction(path,payload){
- $('ai-message').textContent='Проверяем соединение с Neural Deep…';
+ const checking=path==='/api/ai/check',started=Date.now();
+ const showWaiting=()=>{$('ai-message').textContent=checking?`Проверяем ответ Neural Deep… ${Math.floor((Date.now()-started)/1000)} с. Лимит проверки — 30 с.`:'Сохраняем ключ…';};
+ showWaiting();const timer=setInterval(showWaiting,1000);
  $('ai-connect').disabled=$('ai-check').disabled=true;
  try{
-  const {response,data}=await boundedFetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)},195000);if(!response.ok)throw Error(data.detail||'Не удалось проверить AI.');
+  const {response,data}=await boundedFetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)},checking?45000:15000);if(!response.ok)throw Error(data.detail||'Не удалось проверить AI.');
   $('ai-message').textContent=data.message;return data;
  }catch(e){$('ai-message').textContent=e.message;return null;}
- finally{$('ai-key').value='';$('ai-connect').disabled=$('ai-check').disabled=false;}
+ finally{clearInterval(timer);$('ai-key').value='';$('ai-connect').disabled=$('ai-check').disabled=false;}
 }
 $('ai-connect').onclick=async()=>{
  const data=await aiAction('/api/ai/connect',{api_key:$('ai-key').value});if(!data)return;
  aiReady=false;
- $('ai-models').replaceChildren(...data.models.map(m=>new Option(m,m)));
- $('ai-model').value=data.model;
+ selectModel(data.model);
  $('ai-status').textContent='Ключ принят · проверьте модель';
 };
 $('ai-check').onclick=async()=>{
  const data=await aiAction('/api/ai/check',{model:$('ai-model').value});if(!data)return;
  aiReady=true;$('ai-status').textContent='AI проверен · '+data.model;$('ai-option').textContent='AI-анализ · '+data.model;
  $('mode').value='ai';$('mode').dispatchEvent(new Event('change'));error('');
-};
-$('ai-load-models').onclick=async()=>{
- $('ai-load-models').disabled=true;
- try{const {response,data}=await boundedFetch('/api/ai/models');if(!response.ok)throw Error(data.detail);$('ai-models').replaceChildren(...data.models.map(m=>new Option(m,m)));$('ai-message').textContent='Подсказки моделей обновлены. Можно ввести название вручную.';}
- catch(e){$('ai-message').textContent='Список недоступен. Введите модель вручную. '+e.message;}
- finally{$('ai-load-models').disabled=false;}
 };
 async function runAnalysis(retry=false){
  if(busy)return;

@@ -152,7 +152,7 @@ async def ai_connect(request: Request):
             if not key.strip(): raise AIError('Введите ключ Neural Deep или задайте NEURAL_DEEP_API_KEY в .env.')
             os.environ['NEURAL_DEEP_API_KEY']=key
             selected=os.getenv('PROPOSAL_MODEL',DEFAULT_MODEL)
-            return dict(models=[],model=selected,message='Ключ сохранён. Введите модель и проверьте AI. Список моделей необязателен.')
+            return dict(models=[],model=selected,message='Ключ сохранён. Выберите модель и проверьте AI.')
         except Exception as exc:
             raise HTTPException(422,safe_error(exc)) from None
     return await run_in_threadpool(connect)

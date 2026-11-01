@@ -261,6 +261,10 @@ def test_ai_deadline_and_timeout_no_retry(monkeypatch):
  with pytest.raises(ai_service.AIError,match='Тайм-аут ожидания ответа'):
   llm.json('system','user',{},'requirements')
  assert len(calls)==1 and 0<calls[0]['timeout']<=180
+ probe=ai_service.CheckedLLM(api_key='unused')
+ with pytest.raises(ai_service.AIError):probe.json('system','user',{},'connection_test')
+ assert calls[-1]['timeout']<=30 and calls[-1]['max_tokens']==256
+ calls.pop()
  llm.deadline=0
  with pytest.raises(ai_service.AIError,match='10 минут'):
   llm.json('system','user',{},'requirements')
