@@ -93,6 +93,7 @@ with sync_playwright() as p:
  # Render source context returned by the hybrid pipeline.
  page.clock.resume()
  local_result['mode']='ai'
+ local_result['matrix'][0].update(status='частично подтверждено',confirmed_part='Подтверждён анализ данных.',missing_part='Не описана независимая валидация.')
  for evidence in local_result['evidence']:evidence.update(context='Контекст исходного научного проекта.',fragment_id='F1',source_start=0,source_end=36)
  page.route('**/api/analyze',lambda route:route.fulfill(status=202,json={'id':'hybrid-ui'}))
  page.route('**/api/jobs/hybrid-ui',lambda route:route.fulfill(json={'status':'done','stage':'Готово','result':local_result}))
@@ -100,6 +101,9 @@ with sync_playwright() as p:
  page.click('#run')
  page.wait_for_selector('#result-view:not([hidden])')
  page.locator('#matrix-body details').first.locator('summary').first.click()
+ assert page.locator('#analysis-notice').is_hidden()
+ assert 'Что подтверждено:' in page.locator('#matrix-body').inner_text()
+ assert 'Не описана независимая валидация.' in page.locator('#matrix-body').inner_text()
  context=page.locator('#matrix-body blockquote details').first
  context.locator('summary').click()
  assert 'Контекст исходного научного проекта.' in context.inner_text()

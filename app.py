@@ -90,6 +90,7 @@ def verify_quotes(info, evidence, matrix, texts, proposal):
 
 
 def analyze(payload, update=lambda s: None):
+    started=time.monotonic()
     proposal=payload['proposal']; texts={'CV':payload['cv']}
     if payload.get('application'): texts['заявка']=payload['application']
     if payload.get('extra'): texts['дополнительные материалы']=payload['extra']
@@ -102,16 +103,16 @@ def analyze(payload, update=lambda s: None):
             retriever=HybridRetriever(texts)
         except Exception:
             raise AIError('Не удалось подготовить локальную embedding-модель. Выполните python retrieval.py --prepare через Python проекта. При первой загрузке нужен доступ к Hugging Face; после загрузки модель работает локально.') from None
-        update('Извлечение требований Proposal')
-        info=core.extract_requirements(llm,proposal)
+        update('Извлечение требований и опыта из документов')
+        sources=[source for source in texts if source!='идентификаторы']
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            requirement_job=workers.submit(core.extract_requirements,llm,proposal)
+            document_jobs={source:workers.submit(core.extract_evidence,llm,texts[source],source) for source in sources}
+            info=requirement_job.result()
+            blocks={source:future.result() for source,future in document_jobs.items()}
         if not info['requirements']: raise ValueError('Модель не выделила требований. Уточните Proposal.')
-        update('Извлечение опыта CV')
-        cv=core.extract_evidence(llm,texts['CV'],'CV')
-        extra_blocks=[]
-        for source,text in texts.items():
-            if source not in ('CV','идентификаторы'):
-                update('Извлечение опыта: '+source)
-                extra_blocks.append(core.extract_evidence(llm,text,source))
+        cv=blocks['CV']
+        extra_blocks=[block for source,block in blocks.items() if source!='CV']
         extra=dict(evidence=[e for block in extra_blocks for e in block['evidence']],claimed_metrics=[m for block in extra_blocks for m in block['claimed_metrics']])
         ev=core.build_evidence_table(cv,extra,info['self_claims'],[])
         update('Проверка цитат и подготовка фрагментов')
@@ -145,7 +146,7 @@ def analyze(payload, update=lambda s: None):
     report=f'> Режим: {mode}\n\n'+report
     if source_links:
         report+='\n\n## Ссылки из материалов\n\n'+'\n'.join(f"- {x['type']}: {x['url']} (источник: {', '.join(x['sources'])}; содержимое не загружалось)" for x in source_links)
-    return dict(retrieval_method={'name':'multilingual embeddings + BM25 + RRF','embedding_model':EMBEDDING_MODEL,'top_k':6,'fragment_count':len(retriever.fragments)} if payload['mode']=='ai' else None,source_links=source_links,candidate=payload.get('candidate') or 'Кандидат',mode=payload['mode'],requirements=info,evidence=ev,matrix=matrix,risks=rs,profile=profile,report=report,usage=usage)
+    return dict(duration_seconds=round(time.monotonic()-started,2),retrieval_method={'name':'multilingual embeddings + BM25 + RRF','embedding_model':EMBEDDING_MODEL,'top_k':6,'fragment_count':len(retriever.fragments)} if payload['mode']=='ai' else None,source_links=source_links,candidate=payload.get('candidate') or 'Кандидат',mode=payload['mode'],requirements=info,evidence=ev,matrix=matrix,risks=rs,profile=profile,report=report,usage=usage)
 
 @app.get('/')
 def index(): return FileResponse(ROOT/'static/index.html',headers={'Cache-Control':'no-cache'})

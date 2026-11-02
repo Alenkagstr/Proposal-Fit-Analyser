@@ -107,3 +107,36 @@ def test_cached_model_is_loaded_without_network(monkeypatch,tmp_path):
  try:assert retrieval.embedding_model()=='cached-model'
  finally:retrieval.embedding_model.cache_clear()
  assert len(calls)==1
+
+
+def test_parallel_batches_keep_all_context_without_repeating_shared_fragments():
+ import json,threading
+ barrier=threading.Barrier(2)
+ requests=[]
+ requirements=[{**req(),'id':f'R{i}'} for i in range(1,9)]
+ shared=results()['R1']
+ retrieved={r['id']:shared for r in requirements}
+ class LLM:
+  def json(self,system,user,*args):
+   data=json.loads(user.split('ФРАГМЕНТЫ ПО ТРЕБОВАНИЯМ:\n')[1])
+   assert len(data['fragments'])==1
+   assert len(data['candidates'])==4
+   assert data['fragments'][0]['text']==shared[0]['text']
+   requests.append(data)
+   barrier.wait(timeout=5)
+   return {'matches':[dict(req_id=rid,status=core.STATUSES[2],evidence_ids=[],supports=[],rationale='Нет подходящего опыта.',question='Есть ли пример работы?',confirmed_part='',missing_part='Нет примера работы.') for rid in data['candidates']]}
+ matrix,evidence=match_retrieved(LLM(),requirements,[],retrieved)
+ assert len(requests)==2 and not evidence
+ assert [m['req_id'] for m in matrix]==[r['id'] for r in requirements]
+ assert all(len(m['retrieval'])==1 for m in matrix)
+
+
+@pytest.mark.parametrize('gap,expected',[('Не описан этап независимой валидации.',core.STATUSES[1]),('',core.STATUSES[3])])
+def test_partial_project_evidence_requires_a_specific_gap(gap,expected):
+ class LLM:
+  def json(self,*args):return {'matches':[dict(req_id='R1',status=core.STATUSES[1],evidence_ids=[],rationale='Применён метод без полного цикла.',question='',confirmed_part='Выполнен GWAS анализ.',missing_part=gap,supports=[dict(fragment_id='F1',quote='Применяла GWAS в завершённом исследовании.',strength='проект',type='проект',summary_en='GWAS')])]}
+ matrix,evidence=match_retrieved(LLM(),[req()],[],results())
+ assert matrix[0]['status']==expected
+ if gap:
+  assert matrix[0]['confirmed_part']=='Выполнен GWAS анализ.'
+  assert gap in matrix[0]['question']

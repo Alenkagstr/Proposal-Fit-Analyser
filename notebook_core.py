@@ -1206,7 +1206,8 @@ def risks_and_summary(llm: LLM, matrix: list[dict], req_info: dict, profile: dic
                       claimed_metrics: list[dict]) -> dict:
     counts = {s: sum(m["status"] == s for m in matrix) for s in STATUSES}
     lines = [f"{m['req_id']} [{m['type']}, {m['importance']}] {m['requirement']} → {m['status']}"
-             f" ({m['rationale']}){' | вопрос: ' + m['question'] if m.get('question') else ''}" for m in matrix]
+             f" ({m['rationale']}){' | подтверждено: ' + m['confirmed_part'] if m.get('confirmed_part') else ''}"
+             f"{' | не хватает: ' + m['missing_part'] if m.get('missing_part') else ''}{' | вопрос: ' + m['question'] if m.get('question') else ''}" for m in matrix]
     prof = profile or {}
     user = (f"СТАТИСТИКА СТАТУСОВ: {json.dumps(counts, ensure_ascii=False)}\n\n"
             f"МАТРИЦА:\n" + "\n".join(lines) + "\n\n"
@@ -1237,7 +1238,10 @@ def make_report(candidate_id: str, req_info: dict, matrix: list[dict], evidence:
                                          "частично подтверждено", "подтверждено"])}
     for m in sorted(matrix, key=lambda x: (x["importance"] != "ключевое", order[x["status"]])):
         evs = "; ".join(f"{x}: {ev[x]['summary_en'][:60]} ({ev[x]['source']})" for x in m["evidence_ids"][:3])
-        comment = m["rationale"] + (f" _[проверка: {m['auto_check']}]_" if m.get("auto_check") else "")
+        comment = m["rationale"]
+        if m.get('confirmed_part'): comment += ' Подтверждено: '+m['confirmed_part']
+        if m.get('missing_part'): comment += ' Не хватает: '+m['missing_part']
+        comment += (f" _[проверка: {m['auto_check']}]_" if m.get("auto_check") else "")
         md.append(f"| {m['req_id']} | {m['requirement']} | {m['type']} | {m['importance']} | **{m['status']}** "
                   f"| {evs.replace('|', '/')} | {comment.replace('|', '/')} |")
     md += ["", "## Риски", ""]

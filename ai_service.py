@@ -95,6 +95,6 @@ class CheckedLLM:
                 if index<2: continue
                 raise AIError(safe_error(exc)) from None
             usage=getattr(r,'usage',None)
-            self.log.append(dict(step=name,model=self.model,prompt_tokens=getattr(usage,'prompt_tokens',None),completion_tokens=getattr(usage,'completion_tokens',None)))
+            self.log.append(dict(step=name,model=self.model,elapsed_seconds=round(time.monotonic()-started,3),input_chars=len(user),prompt_tokens=getattr(usage,'prompt_tokens',None),completion_tokens=getattr(usage,'completion_tokens',None)))
             return value
         raise AIError('Модель не вернула JSON. Выберите другую модель.')
