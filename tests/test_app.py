@@ -263,7 +263,7 @@ def test_ai_deadline_and_timeout_no_retry(monkeypatch):
  assert len(calls)==1 and 0<calls[0]['timeout']<=180
  probe=ai_service.CheckedLLM(api_key='unused')
  with pytest.raises(ai_service.AIError):probe.json('system','user',{},'connection_test')
- assert calls[-1]['timeout']<=30 and calls[-1]['max_tokens']==256
+ assert calls[-1]['timeout']<=30 and calls[-1]['max_tokens']==8000
  calls.pop()
  llm.deadline=0
  with pytest.raises(ai_service.AIError,match='10 минут'):
@@ -319,3 +319,19 @@ def test_real_sdk_plain_request_and_timeout_diagnostics(monkeypatch):
    message=str(caught.value)
    assert label in message and 'Формат: text' in message
    assert 'private-test-key' not in message and 'private-document' not in message
+
+
+def test_connection_check_token_limit_and_truncation(monkeypatch):
+ import ai_service
+ from types import SimpleNamespace as N
+ calls=[]
+ def completion(**kwargs):
+  calls.append(kwargs)
+  return N(choices=[N(finish_reason='length',message=N(content=''))])
+ monkeypatch.setattr(ai_service,'make_client',lambda key:N(chat=N(completions=N(create=completion))))
+ llm=ai_service.CheckedLLM(api_key='test')
+ with pytest.raises(ai_service.AIError,match='Соединение с Neural Deep установлено') as caught:
+  llm.json('system','short check',{},'connection_test')
+ assert 'Сократите материалы' not in str(caught.value)
+ assert calls[0]['max_tokens']==8000 and calls[0]['timeout']<=30
+ assert len(calls)==1

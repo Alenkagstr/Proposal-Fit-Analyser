@@ -61,7 +61,7 @@ class CheckedLLM:
         formats=[None, {'type':'json_object'}, {'type':'json_schema','json_schema':{'name':name,'schema':schema,'strict':True}}]
         for index,fmt in enumerate(formats):
             instructions=system+'\nВерни только JSON по схеме:\n'+json.dumps(schema,ensure_ascii=False)
-            kwargs=dict(model=self.model,temperature=0,max_tokens=256 if name=='connection_test' else 8000,messages=[{'role':'system','content':instructions},{'role':'user','content':user}])
+            kwargs=dict(model=self.model,temperature=0,max_tokens=8000,messages=[{'role':'system','content':instructions},{'role':'user','content':user}])
             if fmt: kwargs['response_format']=fmt
             remaining=self.deadline-time.monotonic()
             if remaining<=0: raise AIError(deadline_error)
@@ -84,7 +84,10 @@ class CheckedLLM:
                                name,format_name,elapsed,len(user),type(exc).__name__)
                 detail=f'Формат: {format_name}; ожидание: {elapsed:.0f} с; вход: {len(user)} символов.'
                 raise AIError(safe_error(exc)+' '+detail) from None
-            if r.choices[0].finish_reason=='length': raise AIError('Ответ модели обрезан по лимиту токенов. Сократите материалы или выберите модель с большим лимитом ответа.')
+            if r.choices[0].finish_reason=='length':
+                if name=='connection_test':
+                    raise AIError('Соединение с Neural Deep установлено, но модель исчерпала лимит ответа короткой проверки. Проверка JSON не завершена; документы в этом запросе не отправлялись.')
+                raise AIError('Ответ модели обрезан по лимиту токенов. Сократите материалы или выберите модель с большим лимитом ответа.')
             try:
                 value=core._parse_json(r.choices[0].message.content or '')
                 validate(value,schema)
