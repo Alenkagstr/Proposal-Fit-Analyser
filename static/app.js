@@ -81,7 +81,7 @@ async function runAnalysis(retry=false){
   resumeJob=false;
  }
  busy=true;$('run').disabled=true;view('progress');
- $('progress-failure').hidden=true;$('progress-spinner').hidden=false;$('progress-note').hidden=false;
+ $('progress-failure').hidden=true;$('progress-spinner').hidden=false;
  $('progress-title').textContent='Соединяем факты';$('stage').hidden=false;
  if(!resumeJob)$('stage').textContent='Подготовка материалов';
  const deadline=Date.now()+630000;
@@ -100,7 +100,7 @@ async function runAnalysis(retry=false){
   }
   throw Error('Превышено время ожидания анализа. Повтор проверит состояние уже запущенного анализа.');
  }catch(e){
-  $('progress-spinner').hidden=true;$('progress-note').hidden=true;$('progress-title').textContent='Анализ не завершён';
+  $('progress-spinner').hidden=true;$('progress-title').textContent='Анализ не завершён';
   $('stage').hidden=true;
   $('progress-error').textContent=/тайм-аут.*Neural Deep|Neural Deep.*не ответил/i.test(e.message)?'Neural Deep не ответил за отведённое время запроса.':e.message;
   $('progress-failure').hidden=false;
