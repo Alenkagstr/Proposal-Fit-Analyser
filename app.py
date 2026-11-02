@@ -21,6 +21,7 @@ STATUSES = core.STATUSES
 
 from ai_service import CheckedLLM, AIError, safe_error, make_client, DEFAULT_MODEL
 from documents import link_inventory, read_xlsx
+from quote_checks import locate_quote
 
 
 def tokens(text):
@@ -63,18 +64,26 @@ def preliminary(proposal, texts):
 
 
 def verify_quotes(info, evidence, matrix, texts, proposal):
-    norm=lambda x: re.sub(r'\s+',' ',x).strip().casefold()
     bad=set()
     for e in evidence:
         origin = proposal if e['source']=='Proposal (самоописание)' else texts.get(e['source'],'')
-        e['quote_verified']=bool(e['quote'].strip()) and norm(e['quote']) in norm(origin)
+        e['quote'],e['quote_check']=locate_quote(e['quote'],origin)
+        e['quote_verified']=e['quote_check']!='not_found'
         if not e['quote_verified']: bad.add(e['id'])
+    for requirement in info['requirements']:
+        requirement['quote'],method=locate_quote(requirement['quote'],proposal)
+        requirement['quote_verified']=method!='not_found'
     for m in matrix:
         requirement=next(r for r in info['requirements'] if r['id']==m['req_id'])
-        m['quote_verified']=bool(requirement['quote'].strip()) and norm(requirement['quote']) in norm(proposal)
+        m['quote']=requirement['quote']
+        m['quote_verified']=requirement['quote_verified']
         if not m['quote_verified'] or bad.intersection(m['evidence_ids']):
             m['status']=STATUSES[3]
-            m['auto_check']='Цитата не найдена дословно в исходном документе — требуется проверка.'
+            reasons=[]
+            if not m['quote_verified']:reasons.append('Не найдена цитата требования '+m['req_id']+' в Proposal')
+            invalid=sorted(bad.intersection(m['evidence_ids']))
+            if invalid:reasons.append('Не найдены цитаты доказательств: '+', '.join(invalid))
+            m['auto_check']='; '.join(filter(None,[m.get('auto_check',''),*reasons]))
             m['question']=m.get('question') or 'Уточните исходный фрагмент и подтверждение этого требования.'
 
 
@@ -99,7 +108,9 @@ def analyze(payload, update=lambda s: None):
         extra=dict(evidence=[e for block in extra_blocks for e in block['evidence']],claimed_metrics=[m for block in extra_blocks for m in block['claimed_metrics']])
         ev=core.build_evidence_table(cv,extra,info['self_claims'],[])
         update('Сопоставление требований с доказательствами')
-        matrix=core.match(llm,info['requirements'],ev)
+        verify_quotes(info,ev,[],texts,proposal)
+        verified_ev=[e for e in ev if e['quote_verified']]
+        matrix=core.match(llm,info['requirements'],verified_ev)
         verify_quotes(info,ev,matrix,texts,proposal)
         update('Подготовка рисков и справки')
         claimed=cv.get('claimed_metrics',[])+(extra or {}).get('claimed_metrics',[])

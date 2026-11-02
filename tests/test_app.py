@@ -335,3 +335,23 @@ def test_connection_check_token_limit_and_truncation(monkeypatch):
  assert 'Сократите материалы' not in str(caught.value)
  assert calls[0]['max_tokens']==8000 and calls[0]['timeout']<=30
  assert len(calls)==1
+
+
+def test_matching_receives_only_verified_full_evidence(monkeypatch):
+ seen=[]
+ quote='Python и PyTorch '+('подробности проекта '*15)+'уточнение: метод применён на практике'
+ payload={**PAYLOAD,'mode':'ai','cv':quote}
+ class Fake:
+  log=[]
+  def json(self,system,user,schema,name,**kwargs):
+   if name=='requirements': return dict(language='RU',requirements=[dict(summary_en='Python models',type='метод',importance='ключевое',stated='прямо',quote='Python и PyTorch',section='Метод')],missing=[],self_claims=[])
+   if name=='evidence_CV':return dict(language='RU',evidence=[dict(summary_en='Python models',type='проект',strength='проект',year='2024',quote=quote),dict(summary_en='Invented',type='проект',strength='проект',year='',quote='fabricated source evidence')],claimed_metrics=[])
+   if name=='matching':
+    seen.append(user)
+    return dict(matches=[dict(req_id='R1',status='подтверждено',evidence_ids=['E1'],rationale='Проект',question='')])
+   return dict(summary='Справка',risks=[],questions=[])
+ monkeypatch.setattr(app,'CheckedLLM',Fake)
+ result=app.analyze(payload)
+ assert quote in seen[0] and 'fabricated source evidence' not in seen[0]
+ assert result['matrix'][0]['status']=='подтверждено'
+ assert result['evidence'][1]['quote_verified'] is False

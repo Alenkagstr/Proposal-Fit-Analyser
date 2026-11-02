@@ -93,7 +93,7 @@ async function runAnalysis(retry=false){
   while(Date.now()<deadline){
    const {response:r,data:j}=await boundedFetch('/api/jobs/'+jobId,{},Math.min(15000,deadline-Date.now()));
    if(!r.ok){if(r.status===404)resumeJob=false;throw Error(j.detail||'Результат недоступен.');}
-   $('stage').textContent=(j.failed_stage||j.stage)+(j.model?' · '+j.model:'');
+   $('stage').textContent=j.failed_stage||j.stage;
    if(j.status==='error'){resumeJob=false;throw Error(j.error);}
    if(j.status==='done'){resumeJob=false;result=j.result;render();view('result');return;}
    await new Promise(resolve=>setTimeout(resolve,1200));
