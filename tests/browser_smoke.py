@@ -10,6 +10,7 @@ with sync_playwright() as p:
  page.goto(os.getenv('APP_URL','http://127.0.0.1:8000'));page.wait_for_selector('#demo')
  page.screenshot(path=str(out/'desktop.png'),full_page=True)
  page.click('#demo');page.fill('#application','Научный проект: медицинские изображения на Python и PyTorch. https://example.org/publications');page.click('#run');page.wait_for_selector('#result-view:not([hidden])')
+ local_result=page.evaluate('result')
  assert page.locator('#matrix-body tr').count()==6
  page.locator('#matrix-body details').first.locator('summary').click()
  assert page.locator('blockquote').first.is_visible()
@@ -89,6 +90,19 @@ with sync_playwright() as p:
  page.wait_for_function("document.querySelector('#ai-message').textContent.includes('Сервер не ответил вовремя')")
  assert page.locator('#ai-check').is_enabled()
  assert page.locator('#cv').input_value()==original
+ # Render source context returned by the hybrid pipeline.
+ page.clock.resume()
+ local_result['mode']='ai'
+ for evidence in local_result['evidence']:evidence.update(context='Контекст исходного научного проекта.',fragment_id='F1',source_start=0,source_end=36)
+ page.route('**/api/analyze',lambda route:route.fulfill(status=202,json={'id':'hybrid-ui'}))
+ page.route('**/api/jobs/hybrid-ui',lambda route:route.fulfill(json={'status':'done','stage':'Готово','result':local_result}))
+ page.select_option('#mode','local')
+ page.click('#run')
+ page.wait_for_selector('#result-view:not([hidden])')
+ page.locator('#matrix-body details').first.locator('summary').first.click()
+ context=page.locator('#matrix-body blockquote details').first
+ context.locator('summary').click()
+ assert 'Контекст исходного научного проекта.' in context.inner_text()
  assert not errors, errors
  print('Browser checks passed: demo, 6 rows, quotes, filters, risks/questions, report, XLSX download, upload, delete, 390px layout; central failure, retry, preserved documents and poll recovery; no JS errors; AI settings (mocked provider).')
  page.unroute_all(behavior='ignoreErrors')

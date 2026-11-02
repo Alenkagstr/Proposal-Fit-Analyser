@@ -22,6 +22,8 @@ STATUSES = core.STATUSES
 from ai_service import CheckedLLM, AIError, safe_error, make_client, DEFAULT_MODEL
 from documents import link_inventory, read_xlsx
 from quote_checks import locate_quote
+from retrieval import HybridRetriever, MODEL as EMBEDDING_MODEL
+from retrieval_match import match_retrieved
 
 
 def tokens(text):
@@ -95,6 +97,11 @@ def analyze(payload, update=lambda s: None):
     update('Извлечение требований и опыта')
     if payload['mode']=='ai':
         llm=CheckedLLM()
+        update('Подготовка локальной модели поиска и эмбеддингов')
+        try:
+            retriever=HybridRetriever(texts)
+        except Exception:
+            raise AIError('Не удалось подготовить локальную embedding-модель. Выполните python retrieval.py --prepare через Python проекта. При первой загрузке нужен доступ к Hugging Face; после загрузки модель работает локально.') from None
         update('Извлечение требований Proposal')
         info=core.extract_requirements(llm,proposal)
         if not info['requirements']: raise ValueError('Модель не выделила требований. Уточните Proposal.')
@@ -107,10 +114,22 @@ def analyze(payload, update=lambda s: None):
                 extra_blocks.append(core.extract_evidence(llm,text,source))
         extra=dict(evidence=[e for block in extra_blocks for e in block['evidence']],claimed_metrics=[m for block in extra_blocks for m in block['claimed_metrics']])
         ev=core.build_evidence_table(cv,extra,info['self_claims'],[])
-        update('Сопоставление требований с доказательствами')
+        update('Проверка цитат и подготовка фрагментов')
         verify_quotes(info,ev,[],texts,proposal)
         verified_ev=[e for e in ev if e['quote_verified']]
-        matrix=core.match(llm,info['requirements'],verified_ev)
+        for evidence in verified_ev:
+            for fragment in retriever.fragments:
+                if fragment['source']==evidence['source'] and locate_quote(evidence['quote'],fragment['text'])[1]!='not_found':
+                    evidence.update(fragment_id=fragment['id'],source_start=fragment['start'],source_end=fragment['end'],context=fragment['text'])
+                    break
+        try:
+            update('Гибридный поиск: смысл и научные термины')
+            retrieved=retriever.search_many(info['requirements'])
+        except Exception:
+            raise AIError('Не удалось выполнить гибридный поиск: ошибка вычисления эмбеддингов. Проверьте локальную модель командой python retrieval.py --prepare через Python проекта.') from None
+        update('Оценка найденного контекста по каждому требованию')
+        matrix,new_ev=match_retrieved(llm,info['requirements'],verified_ev,retrieved,reserved_ids={e['id'] for e in ev})
+        ev+= [e for e in new_ev if e['id'] not in {item['id'] for item in ev}]
         verify_quotes(info,ev,matrix,texts,proposal)
         update('Подготовка рисков и справки')
         claimed=cv.get('claimed_metrics',[])+(extra or {}).get('claimed_metrics',[])
@@ -126,7 +145,7 @@ def analyze(payload, update=lambda s: None):
     report=f'> Режим: {mode}\n\n'+report
     if source_links:
         report+='\n\n## Ссылки из материалов\n\n'+'\n'.join(f"- {x['type']}: {x['url']} (источник: {', '.join(x['sources'])}; содержимое не загружалось)" for x in source_links)
-    return dict(source_links=source_links,candidate=payload.get('candidate') or 'Кандидат',mode=payload['mode'],requirements=info,evidence=ev,matrix=matrix,risks=rs,profile=profile,report=report,usage=usage)
+    return dict(retrieval_method={'name':'multilingual embeddings + BM25 + RRF','embedding_model':EMBEDDING_MODEL,'top_k':6,'fragment_count':len(retriever.fragments)} if payload['mode']=='ai' else None,source_links=source_links,candidate=payload.get('candidate') or 'Кандидат',mode=payload['mode'],requirements=info,evidence=ev,matrix=matrix,risks=rs,profile=profile,report=report,usage=usage)
 
 @app.get('/')
 def index(): return FileResponse(ROOT/'static/index.html',headers={'Cache-Control':'no-cache'})

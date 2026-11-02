@@ -7,6 +7,15 @@ import app
 client=TestClient(app.app)
 PAYLOAD=dict(cv='Python и PyTorch: проект сегментации медицинских изображений в 2024 году.\nСтатистический анализ результатов проекта.',proposal='Метод: сегментация медицинских изображений на Python и PyTorch.\nРесурс: доступ к лаборатории и GPU.\nЭтап: валидация за 12 месяцев.',mode='local',candidate='C01')
 
+@pytest.fixture(autouse=True)
+def local_search_without_model_download(monkeypatch):
+ from retrieval import HybridRetriever
+ class Encoder:
+  def passage_embed(self,texts,**kwargs):return [[1.,float(len(t)%7+1)] for t in texts]
+  query_embed=passage_embed
+ monkeypatch.setattr(app,'HybridRetriever',lambda texts:HybridRetriever(texts,encoder=Encoder()))
+
+
 def wait_result(ident):
  for _ in range(200):
   r=client.get('/api/jobs/'+ident).json()
@@ -355,3 +364,46 @@ def test_matching_receives_only_verified_full_evidence(monkeypatch):
  assert quote in seen[0] and 'fabricated source evidence' not in seen[0]
  assert result['matrix'][0]['status']=='подтверждено'
  assert result['evidence'][1]['quote_verified'] is False
+
+
+def test_hybrid_pipeline_recovers_experience_missed_by_initial_extraction(monkeypatch):
+ quote='В проекте применила PheWAS для анализа фенотипических связей.'
+ class Fake:
+  log=[]
+  def json(self,system,user,schema,name,**kwargs):
+   if name=='requirements':return dict(language='RU',requirements=[dict(summary_en='Conduct PheWAS',type='метод',importance='ключевое',stated='прямо',quote='Провести PheWAS анализ',section='Метод')],missing=[],self_claims=[])
+   if name=='evidence_CV':return dict(language='RU',evidence=[],claimed_metrics=[])
+   if name=='matching':
+    assert quote in user
+    return dict(matches=[dict(req_id='R1',status='подтверждено',evidence_ids=[],rationale='Работа в проекте.',question='',supports=[dict(fragment_id='F1',quote=quote,strength='проект',type='проект',summary_en='PheWAS study')])])
+   return dict(summary='Справка',risks=[],questions=[])
+ monkeypatch.setattr(app,'CheckedLLM',Fake)
+ result=app.analyze({**PAYLOAD,'cv':quote,'proposal':'Метод: Провести PheWAS анализ в ходе проекта.','mode':'ai'})
+ assert result['matrix'][0]['status']=='подтверждено'
+ assert result['evidence'][0]['quote']==quote
+ assert result['evidence'][0]['source']=='CV'
+ assert result['evidence'][0]['fragment_id']=='F1'
+ assert result['matrix'][0]['retrieval'][0]['fragment_id']=='F1'
+ assert result['retrieval_method']['top_k']==6
+ monkeypatch.setenv('NEURAL_DEEP_API_KEY','test-only')
+ response=client.post('/api/analyze',json={**PAYLOAD,'cv':quote,'proposal':'Метод: Провести PheWAS анализ в ходе проекта.','mode':'ai'})
+ ident=response.json()['id']
+ job=wait_result(ident)
+ assert job['status']=='done'
+ exported=client.get('/api/jobs/'+ident+'/export/json').json()
+ assert exported['evidence'][0]['context']==quote
+ workbook=load_workbook(io.BytesIO(client.get('/api/jobs/'+ident+'/export/xlsx').content))
+ headers=[cell.value for cell in workbook['Опыт'][1]]
+ assert 'fragment_id' in headers and 'context' in headers
+ assert client.delete('/api/jobs/'+ident).status_code==200
+
+
+def test_embedding_failure_is_explicit_and_does_not_call_provider(monkeypatch):
+ class Fake:
+  def json(self,*args):raise AssertionError('Provider must not be called when embeddings are unavailable')
+ monkeypatch.setattr(app,'CheckedLLM',Fake)
+ def unavailable(texts):raise OSError('private-detail')
+ monkeypatch.setattr(app,'HybridRetriever',unavailable)
+ with pytest.raises(app.AIError,match='embedding-модель') as caught:
+  app.analyze({**PAYLOAD,'mode':'ai'})
+ assert 'private-detail' not in str(caught.value)
