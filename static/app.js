@@ -11,14 +11,14 @@ async function boundedFetch(url,options={},timeout=15000){
 const statuses=['подтверждено','частично подтверждено','не найдено в материалах','требует экспертной проверки'];
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function error(message){$('error').textContent=message;$('error').hidden=!message;}
-function view(name){for(const n of ['input','progress','result']) $(n+'-view').hidden=n!==name;$('crumb').textContent=name==='input'?'Новый анализ':name==='progress'?'Сопоставление':'Результаты';$('nav-input').classList.toggle('active',name==='input');$('nav-result').classList.toggle('active',name==='result');error('');window.scrollTo({top:0,behavior:'smooth'});}
+function view(name){for(const n of ['input','progress','result']) $(n+'-view').hidden=n!==name;$('nav-input').classList.toggle('active',name==='input');$('nav-result').classList.toggle('active',name==='result');error('');window.scrollTo({top:0,behavior:'smooth'});}
 function count(id){$(id+'-count').textContent=$(id).value.length.toLocaleString('ru')+' символов';}
 for(const id of ['cv','proposal','application']) $(id).addEventListener('input',()=>count(id));
 async function upload(file,target,label){
  if(!file)return;
  error(''); if(file.size>8*1024*1024){error('Максимальный размер файла — 8 МБ.');return;}
- const title=label.querySelector('strong');title.textContent='Читаем документ…';$('run').disabled=true;
- try{const form=new FormData();form.append('file',file);const r=await fetch('/api/extract',{method:'POST',body:form});const data=await r.json();if(!r.ok)throw Error(data.detail||'Не удалось загрузить файл.');$(target).value=data.text;count(target);uploadedLinks[target]=data.links||[];showInputLinks();title.textContent='✓ '+file.name;}catch(e){title.textContent='Выберите файл или перетащите сюда';error(e.message);}finally{$('run').disabled=false;}
+ const title=$(target+'-status');title.textContent='Читаем документ…';$('run').disabled=true;
+ try{const form=new FormData();form.append('file',file);const r=await fetch('/api/extract',{method:'POST',body:form});const data=await r.json();if(!r.ok)throw Error(data.detail||'Не удалось загрузить файл.');$(target).value=data.text;count(target);uploadedLinks[target]=data.links||[];showInputLinks();title.textContent='✓ '+file.name;label.classList.add('loaded');}catch(e){title.textContent=$(target).value?'Предыдущий документ сохранён':'Файл не загружен';error(e.message);}finally{$('run').disabled=false;}
 }
 for(const input of document.querySelectorAll('input[type=file]')){
  const label=input.closest('label');input.addEventListener('change',()=>upload(input.files[0],input.dataset.target,label));
@@ -28,6 +28,7 @@ for(const input of document.querySelectorAll('input[type=file]')){
 $('demo').onclick=()=>{
  $('cv').value='Анна Петрова — исследователь в области машинного обучения.\n2022–2024: проект по анализу медицинских изображений. Разработала модели компьютерного зрения на Python и PyTorch.\nПубликация: «Сегментация медицинских изображений с помощью глубокого обучения», 2024.\nОпыт подготовки датасетов и оценки качества моделей.\nНавыки: Python, PyTorch, статистический анализ. Доступ к вычислительной инфраструктуре не указан.';
  $('proposal').value='Цель: разработать методы машинного обучения для анализа медицинских изображений.\nМетод: обучить модели компьютерного зрения на Python и PyTorch.\nЗадача: провести статистический анализ и оценку качества моделей.\nРесурс: необходим доступ к GPU-кластеру и лаборатории для клинической валидации.\nЭтап: за 12 месяцев собрать датасет и проверить модель на независимой выборке.\nРезультат: подготовить публикацию и открытый датасет.';
+ for(const id of ['cv','application','proposal']){$(id+'-file').value='';$(id+'-file').closest('label').classList.toggle('loaded',id!=='application');$(id+'-status').textContent=id==='application'?'Необязательно':'Учебный пример';delete uploadedLinks[id];}showInputLinks();
  $('candidate').value='Анна Петрова · учебный пример';$('mode').value='local';$('extra').value='';$('profiles').value='';$('application').value='';count('application');count('cv');count('proposal');$('mode').dispatchEvent(new Event('change'));error('');
 };
 function showInputLinks(){
@@ -37,7 +38,7 @@ function showInputLinks(){
 $('application').addEventListener('input',()=>{$('input-links').textContent='Ссылки из текущего текста будут извлечены при анализе.';});
 $('mode').onchange=()=>{
  $('mode-note').textContent=$('mode').value==='ai'?'Требования → опыт CV и заявки → сопоставление → справка. Тексты отправляются Neural Deep.':'Поиск текстовых совпадений без лимита в 100 пунктов. Компетенции проверяет эксперт.';
- if($('mode').value==='ai'&&!aiReady){$('ai-settings').open=true;$('ai-message').textContent='Сначала подключите ключ и проверьте выбранную модель. Анализ не будет подменён локальным режимом.';}
+ if($('mode').value==='ai'&&!aiReady){$('ai-settings').open=true;$('ai-message').textContent='Задайте ключ в .env, перезапустите сервер и проверьте выбранную модель. Анализ не будет подменён локальным режимом.';}
 };
 function selectModel(model){
  const select=$('ai-model');
@@ -55,19 +56,13 @@ async function aiAction(path,payload){
  const checking=path==='/api/ai/check',started=Date.now();
  const showWaiting=()=>{$('ai-message').textContent=checking?`Проверяем ответ Neural Deep… ${Math.floor((Date.now()-started)/1000)} с. Лимит проверки — 30 с.`:'Сохраняем ключ…';};
  showWaiting();const timer=setInterval(showWaiting,1000);
- $('ai-connect').disabled=$('ai-check').disabled=true;
+ $('ai-check').disabled=true;
  try{
   const {response,data}=await boundedFetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)},checking?45000:15000);if(!response.ok)throw Error(data.detail||'Не удалось проверить AI.');
   $('ai-message').textContent=data.message;return data;
  }catch(e){$('ai-message').textContent=e.message;return null;}
- finally{clearInterval(timer);$('ai-key').value='';$('ai-connect').disabled=$('ai-check').disabled=false;}
+ finally{clearInterval(timer);$('ai-check').disabled=false;}
 }
-$('ai-connect').onclick=async()=>{
- const data=await aiAction('/api/ai/connect',{api_key:$('ai-key').value});if(!data)return;
- aiReady=false;
- selectModel(data.model);
- $('ai-status').textContent='Ключ принят · проверьте модель';
-};
 $('ai-check').onclick=async()=>{
  const data=await aiAction('/api/ai/check',{model:$('ai-model').value});if(!data)return;
  aiReady=true;$('ai-status').textContent='AI проверен · '+data.model;$('ai-option').textContent='AI-анализ · '+data.model;
@@ -77,6 +72,7 @@ async function runAnalysis(retry=false){
  if(busy)return;
  if(!retry){
   if($('mode').value==='ai'&&!aiReady){$('ai-settings').open=true;error('Подключите Neural Deep и нажмите «Проверить AI».');return;}
+  if(!$('cv').value.trim()||!$('proposal').value.trim()){error('Загрузите CV и Proposal перед анализом.');return;}
   pendingPayload={};for(const k of ['cv','proposal','application','extra','candidate','profiles','mode'])pendingPayload[k]=$(k).value;
   resumeJob=false;
  }
@@ -127,4 +123,4 @@ function render(){
 function tab(name){for(const n of ['matrix','risks','report','sources'])$(n+'-panel').hidden=n!==name;for(const b of document.querySelectorAll('[data-tab]')){b.classList.toggle('selected',b.dataset.tab===name);b.setAttribute('aria-selected',String(b.dataset.tab===name));} $('filter').hidden=name!=='matrix';}
 for(const b of document.querySelectorAll('[data-tab]'))b.onclick=()=>tab(b.dataset.tab);
 $('filter').onchange=matrix;$('back').onclick=()=>view('input');$('nav-input').onclick=()=>{if(!busy)view('input');};$('nav-result').onclick=()=>{if(result&&!busy)view('result');};
-$('delete').onclick=async()=>{try{const r=await fetch('/api/jobs/'+jobId,{method:'DELETE'});if(!r.ok)throw Error('Не удалось удалить анализ.');result=null;jobId=null;$('nav-result').disabled=true;for(const id of ['cv','proposal','application','extra','candidate','profiles'])$(id).value='';for(const id of ['cv','proposal','application']){count(id);$(id+'-file').value='';$(id+'-file').closest('label').querySelector('strong').textContent='Выберите файл или перетащите сюда';}uploadedLinks.application=[];showInputLinks();for(const id of ['matrix-body','risks-panel','report-text','sources-panel','stats'])$(id).textContent='';view('input');}catch(e){error(e.message);}};
+$('delete').onclick=async()=>{try{const r=await fetch('/api/jobs/'+jobId,{method:'DELETE'});if(!r.ok)throw Error('Не удалось удалить анализ.');result=null;jobId=null;$('nav-result').disabled=true;for(const id of ['cv','proposal','application','extra','candidate','profiles'])$(id).value='';for(const id of ['cv','proposal','application']){count(id);$(id+'-file').value='';$(id+'-file').closest('label').classList.remove('loaded');$(id+'-status').textContent=id==='application'?'Необязательно':'Обязательный документ';}uploadedLinks.application=[];showInputLinks();for(const id of ['matrix-body','risks-panel','report-text','sources-panel','stats'])$(id).textContent='';view('input');}catch(e){error(e.message);}};

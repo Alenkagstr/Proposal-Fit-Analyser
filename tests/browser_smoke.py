@@ -9,7 +9,13 @@ with sync_playwright() as p:
  errors=[];page.on('pageerror',lambda e: errors.append(str(e)))
  page.goto(os.getenv('APP_URL','http://127.0.0.1:8000'));page.wait_for_selector('#demo')
  page.screenshot(path=str(out/'desktop.png'),full_page=True)
- page.click('#demo');page.fill('#application','Научный проект: медицинские изображения на Python и PyTorch. https://example.org/publications');page.click('#run');page.wait_for_selector('#result-view:not([hidden])')
+ circle=page.locator('label[for="cv-file"]')
+ with page.expect_file_chooser(): circle.click()
+ circle.hover()
+ page.wait_for_timeout(500)
+ assert circle.evaluate("el=>getComputedStyle(el,'::before').transform")=='matrix(1, 0, 0, 1, 0, 0)'
+
+ page.click('#demo');page.locator('#application').evaluate('(el,value)=>el.value=value','Научный проект: медицинские изображения на Python и PyTorch. https://example.org/publications');page.click('#run');page.wait_for_selector('#result-view:not([hidden])')
  local_result=page.evaluate('result')
  assert page.locator('#matrix-body tr').count()==6
  page.locator('#matrix-body details').first.locator('summary').click()
@@ -27,10 +33,12 @@ with sync_playwright() as p:
  assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
  page.screenshot(path=str(out/'mobile.png'),full_page=True)
  page.select_option('#mode','ai');assert page.locator('#ai-settings').get_attribute('open') is not None
- page.route('**/api/ai/connect',lambda route: route.fulfill(json={'models':['test-model'],'model':'test-model','message':'Ключ принят'}))
- page.route('**/api/ai/check',lambda route: route.fulfill(json={'ok':True,'model':'test-model','message':'Проверка прошла'}))
- page.fill('#ai-key','browser-test-key');page.click('#ai-connect');page.wait_for_function("document.querySelector('#ai-model').value === 'test-model'")
- assert page.locator('#ai-key').input_value()==''
+ assert page.locator('#ai-key, #ai-connect, .breadcrumb, .local-badge').count()==0
+ assert page.locator('.upload-circle').count()==3
+ assert page.locator('#cv').is_hidden()
+ assert page.locator('#ai-model option').all_text_contents()==['qwen3.6-35b-a3b','qwen3.8-27b','qwen3.6-fp8']
+ page.route('**/api/ai/check',lambda route: route.fulfill(json={'ok':True,'model':'qwen3.8-27b','message':'Проверка прошла'}))
+ page.select_option('#ai-model','qwen3.8-27b')
  page.click('#ai-check');page.wait_for_function("document.querySelector('#ai-status').textContent.includes('AI проверен')")
  page.select_option('#mode','local')
  page.set_input_files('#cv-file',{'name':'cv.txt','mimeType':'text/plain','buffer':'Python: разработка моделей анализа научных данных.'.encode()})
@@ -38,7 +46,7 @@ with sync_playwright() as p:
  page.click('#nav-result') if page.locator('#nav-result').is_visible() else page.evaluate("document.querySelector('#nav-result').click()")
  page.click('#delete');page.wait_for_function("document.querySelector('#cv').value === ''")
  # Fail centrally, retry without losing any document, then return to edit.
- page.click('#demo');page.fill('#application','Заявка: научный проект Python, исходные данные сохранены.')
+ page.click('#demo');page.locator('#application').evaluate('(el,value)=>el.value=value','Заявка: научный проект Python, исходные данные сохранены.')
  original=page.locator('#cv').input_value()
  page.route('**/api/analyze',lambda route: route.fulfill(status=202,json={'id':'mock-failed'}))
  page.route('**/api/jobs/mock-failed',lambda route: route.fulfill(json={'status':'error','stage':'Извлечение опыта CV','failed_stage':'Извлечение опыта CV','error':'Neural Deep не ответил вовремя.'}))
