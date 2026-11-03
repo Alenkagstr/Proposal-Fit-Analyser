@@ -12,8 +12,10 @@ with sync_playwright() as p:
  circle=page.locator('label[for="cv-file"]')
  with page.expect_file_chooser(): circle.click()
  circle.hover()
- page.wait_for_timeout(500)
- assert circle.evaluate("el=>getComputedStyle(el,'::before').transform")=='matrix(1, 0, 0, 1, 0, 0)'
+ page.wait_for_timeout(750)
+ assert circle.evaluate("el=>getComputedStyle(el,'::after').opacity")=='1'
+ assert 'radial-gradient' in circle.evaluate("el=>getComputedStyle(el,'::after').backgroundImage")
+ assert page.locator('.n3').bounding_box()['y']>circle.bounding_box()['y']
 
  page.click('#demo');page.locator('#application').evaluate('(el,value)=>el.value=value','Научный проект: медицинские изображения на Python и PyTorch. https://example.org/publications');page.click('#run');page.wait_for_selector('#result-view:not([hidden])')
  local_result=page.evaluate('result')

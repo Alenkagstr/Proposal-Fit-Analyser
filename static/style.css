@@ -10,19 +10,21 @@
 
 .ai-settings button{border-radius:999px;padding:12px 24px}
 
-/* Central document upload controls. */
+/* Document uploads keep the original three-source composition. */
 .page-heading{grid-template-columns:1fr}.section-top{justify-content:flex-end}
-.documents{display:flex;justify-content:center;align-items:flex-start;gap:clamp(24px,6vw,90px);padding:30px 0 16px}
-.document-upload{width:clamp(120px,18vw,200px);text-align:center;min-width:0}
-.upload-circle{width:100%;aspect-ratio:1;min-height:0;padding:15px;border:1px solid #cdb7df;border-radius:50%;overflow:hidden;background:#fff;isolation:isolate}
-.upload-circle:before{content:'';position:absolute;inset:0;background:var(--blue);transform:translateY(101%);transition:transform .45s ease;z-index:-1;border-radius:50%}
-.upload-circle:hover:before,.upload-circle:focus-within:before,.upload-circle.drag:before{transform:translateY(0)}
-.upload-circle:hover,.upload-circle.drag{background:#fff}
-.upload-circle strong{font-size:clamp(19px,2.5vw,30px);color:#171717;transition:color .3s}
-.upload-prompt{font-size:11px;color:#82748c;transition:color .3s}
-.upload-circle:hover strong,.upload-circle:hover .upload-prompt,.upload-circle:focus-within strong,.upload-circle:focus-within .upload-prompt,.upload-circle.drag strong,.upload-circle.drag .upload-prompt{color:white}
-.upload-circle.loaded{border:2px solid var(--blue)}
-.upload-status{display:block;margin-top:16px;font-size:11px;color:#82748c;overflow-wrap:anywhere;line-height:1.6}
+.upload-composition{display:block;width:min(100%,470px);margin:0 auto 20px;padding:0 20px;min-height:280px}
+.upload-composition .evidence-diagram{display:block;height:230px}
+.upload-circle{min-height:0;padding:0;gap:0;cursor:pointer;isolation:isolate;transition:border-color .5s ease,box-shadow .5s ease}
+.upload-circle:after{content:'';position:absolute;inset:0;border-radius:50%;background:radial-gradient(circle at 25% 20%,#f1e3ff 0%,#d4acff 40%,#a651f5 75%,#8000ff 100%);opacity:0;transition:opacity .65s ease;z-index:-1;pointer-events:none}
+.upload-circle:hover,.upload-circle.drag{background:#f8f8f8;border-color:#c49be9;box-shadow:0 0 25px #a651f51a}
+.upload-circle:hover:after,.upload-circle:focus-within:after,.upload-circle.drag:after{opacity:1}
+.upload-circle strong{color:#111;font-size:20px;font-weight:700}
+.upload-circle small{color:#777;font-size:8px}
+.upload-circle>span{color:#aaa;font-size:8px}
+.upload-circle.loaded{border-color:var(--blue)}
+.upload-statuses{text-align:center;font-size:11px;color:#82748c;line-height:1.7;overflow-wrap:anywhere}
+.upload-status{display:block}.upload-status:empty{display:none}
 .upload-formats{text-align:center;font-size:10px;color:#96919d;margin-bottom:30px}
-@media(max-width:480px){.documents{gap:12px;padding-top:20px}.document-upload{width:calc((100% - 24px)/3)}.upload-circle{padding:8px}.upload-circle strong{font-size:18px}.upload-prompt{font-size:9px}.upload-status{font-size:9px}}
-@media(prefers-reduced-motion:reduce){.upload-circle:before,.upload-circle strong,.upload-prompt{transition:none}}
+@media(max-width:1100px){.upload-composition .diagram-node{width:104px;height:104px}.upload-composition .n2{right:5px}.upload-composition .n3{left:125px}}
+@media(max-width:480px){.upload-composition{padding:0;max-width:350px}.upload-composition .n1{left:12px}.upload-composition .n2{right:14px}.upload-composition .n3{left:110px}.upload-composition .diagram-node{width:96px;height:96px}.upload-circle strong{font-size:18px}}
+@media(prefers-reduced-motion:reduce){.upload-circle,.upload-circle:after{transition:none}}
