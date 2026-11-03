@@ -17,6 +17,30 @@ with sync_playwright() as p:
  assert 'radial-gradient' in circle.evaluate("el=>getComputedStyle(el,'::after').backgroundImage")
  assert page.locator('.n3').bounding_box()['y']>circle.bounding_box()['y']
 
+ # The original composition starts at the right; each file control moves to center.
+ for width,height in [(1440,1080),(390,844)]:
+  page.set_viewport_size({'width':width,'height':height})
+  for index,target in enumerate(['cv','application','proposal']):
+   page.evaluate("""index=>{const el=document.querySelector('#upload-journey');window.scrollTo({top:el.getBoundingClientRect().top+scrollY+(el.offsetHeight-innerHeight)*(index+.5)/3,behavior:'instant'});} """,index)
+   page.wait_for_timeout(100)
+   control=page.locator(f'label[for="{target}-file"]')
+   box=control.bounding_box()
+   assert abs(box['x']+box['width']/2-width/2)<2, (target,box)
+   assert abs(box['y']+box['height']/2-height/2)<2, (target,box)
+   assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+   with page.expect_file_chooser() as chooser: control.click()
+   chooser.value.set_files({'name':target+'.txt','mimeType':'text/plain','buffer':('Python: научный проект, анализ данных и медицинских изображений. '+target).encode()})
+   page.wait_for_function("target=>document.getElementById(target+'-status').textContent.includes('✓')",arg=target)
+   assert page.locator('#'+target).is_hidden()
+  page.screenshot(path=str(out/f'scroll-upload-{width}.png'))
+ page.emulate_media(reduced_motion='reduce')
+ page.wait_for_timeout(100)
+ assert page.locator('#upload-journey').evaluate('el=>el.offsetHeight')<1080
+ page.emulate_media(reduced_motion='no-preference')
+ page.set_viewport_size({'width':1440,'height':1080})
+ page.evaluate("window.scrollTo({top:0,behavior:'instant'})")
+ page.wait_for_timeout(100)
+ page.screenshot(path=str(out/'composition-right.png'),full_page=False)
  page.click('#demo');page.locator('#application').evaluate('(el,value)=>el.value=value','Научный проект: медицинские изображения на Python и PyTorch. https://example.org/publications');page.click('#run');page.wait_for_selector('#result-view:not([hidden])')
  local_result=page.evaluate('result')
  assert page.locator('#matrix-body tr').count()==6

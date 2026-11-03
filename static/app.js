@@ -124,3 +124,53 @@ function tab(name){for(const n of ['matrix','risks','report','sources'])$(n+'-pa
 for(const b of document.querySelectorAll('[data-tab]'))b.onclick=()=>tab(b.dataset.tab);
 $('filter').onchange=matrix;$('back').onclick=()=>view('input');$('nav-input').onclick=()=>{if(!busy)view('input');};$('nav-result').onclick=()=>{if(result&&!busy)view('result');};
 $('delete').onclick=async()=>{try{const r=await fetch('/api/jobs/'+jobId,{method:'DELETE'});if(!r.ok)throw Error('Не удалось удалить анализ.');result=null;jobId=null;$('nav-result').disabled=true;for(const id of ['cv','proposal','application','extra','candidate','profiles'])$(id).value='';for(const id of ['cv','proposal','application']){count(id);$(id+'-file').value='';$(id+'-file').closest('label').classList.remove('loaded');$(id+'-status').textContent=id==='application'?'Необязательно':'Обязательный документ';}uploadedLinks.application=[];showInputLinks();for(const id of ['matrix-body','risks-panel','report-text','sources-panel','stats'])$(id).textContent='';view('input');}catch(e){error(e.message);}};
+
+// Move the original upload controls, preserving file inputs and keyboard access.
+(()=>{
+ const journey=$('upload-journey'),stage=journey.querySelector('.journey-stage');
+ const circles=[...journey.querySelectorAll('.upload-circle')];
+ const ids=['cv','application','proposal'],titles=['Загрузите CV','Загрузите заявку','Загрузите Proposal'];
+ const reduced=matchMedia('(prefers-reduced-motion: reduce)');
+ const decorations=[...journey.querySelectorAll('.diagram-grid,.diagram-line,.accent,.accent-dot,.panel-label,.upload-composition>p,.upload-composition>small')];
+ const heading=journey.querySelector('.page-heading>div:first-child'),caption=journey.querySelector('.journey-caption');
+ let frame=0;
+ const clamp=x=>Math.max(0,Math.min(1,x));
+ const ease=x=>x*x*(3-2*x);
+ function paint(){
+  frame=0;if($('input-view').hidden)return;
+  if(reduced.matches){for(const c of circles){c.style.transform='';c.style.opacity='';c.style.pointerEvents='';}heading.style.opacity='';for(const d of decorations)d.style.opacity='';caption.style.opacity='';return;}
+  const travel=journey.offsetHeight-innerHeight;
+  const progress=clamp(-journey.getBoundingClientRect().top/travel)*3;
+  const active=Math.min(2,Math.floor(progress));
+  const phase=progress-active;
+  const enter=ease(clamp(phase/.28));
+  const leave=active===2?0:ease(clamp((phase-.78)/.22));
+  const amount=enter*(1-leave);
+  const stageBox=stage.getBoundingClientRect();
+  circles.forEach((circle,index)=>{
+   // Offset positions are independent of the animated transform.
+   const diagram=circle.parentElement.getBoundingClientRect();
+   const x=diagram.left+circle.offsetLeft+circle.offsetWidth/2;
+   const y=diagram.top+circle.offsetTop+circle.offsetHeight/2;
+   const t=index===active?amount:0;
+   const dx=innerWidth/2-x,dy=stageBox.top+innerHeight/2-y;
+   circle.style.transform=`translate(${dx*t}px,${dy*t}px) scale(${1+t*.8})`;
+   circle.style.opacity=index===active?'1':String(1-amount*.86);
+   circle.style.zIndex=index===active?'5':'3';
+   circle.style.pointerEvents=index===active||amount<.1?'auto':'none';
+  });
+  heading.style.opacity=String(1-amount);
+  for(const d of decorations)d.style.opacity=String(1-amount);
+  caption.style.opacity=String(amount);
+  caption.querySelector('.journey-scroll').textContent=active===2?'Прокрутите вниз · к анализу ↓':'Прокрутите вниз · следующий документ ↓';
+  $('upload-step').textContent=`0${active+1} / 03`;
+  $('upload-title').textContent=titles[active];
+  $('upload-description').textContent=active===1?'Необязательно · нажмите на круг, чтобы выбрать файл':'Нажмите на круг, чтобы выбрать файл';
+  $('upload-current-status').textContent=$(ids[active]+'-status').textContent;
+ }
+ function schedule(){if(!frame)frame=requestAnimationFrame(paint);}
+ addEventListener('scroll',schedule,{passive:true});addEventListener('resize',schedule);reduced.addEventListener('change',schedule);
+ new MutationObserver(schedule).observe($('upload-statuses')||document.querySelector('.upload-statuses'),{subtree:true,childList:true,characterData:true});
+ new MutationObserver(schedule).observe($('input-view'),{attributes:true,attributeFilter:['hidden']});
+ schedule();
+})();

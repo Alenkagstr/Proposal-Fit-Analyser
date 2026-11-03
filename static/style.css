@@ -28,3 +28,18 @@
 @media(max-width:1100px){.upload-composition .diagram-node{width:104px;height:104px}.upload-composition .n2{right:5px}.upload-composition .n3{left:125px}}
 @media(max-width:480px){.upload-composition{padding:0;max-width:350px}.upload-composition .n1{left:12px}.upload-composition .n2{right:14px}.upload-composition .n3{left:110px}.upload-composition .diagram-node{width:96px;height:96px}.upload-circle strong{font-size:18px}}
 @media(prefers-reduced-motion:reduce){.upload-circle,.upload-circle:after{transition:none}}
+
+/* Scroll through the same circles from the opening composition. */
+.upload-journey{height:340vh;position:relative}
+.journey-stage{position:sticky;top:0;height:100vh;display:flex;align-items:flex-start;padding-top:40px}
+.journey-stage .page-heading{width:100%;grid-template-columns:1.65fr 1fr;gap:60px}
+.journey-stage .upload-composition{width:100%;margin:0;min-width:0}
+.journey-stage .upload-circle{will-change:transform;transform-origin:center;z-index:3}
+.journey-stage .accent,.journey-stage .accent-dot{pointer-events:none}
+.journey-caption{position:absolute;left:0;right:0;top:calc(50% + 135px);text-align:center;opacity:0;pointer-events:none}
+.journey-caption>span:first-child{font-size:10px;letter-spacing:2px;color:var(--blue)}
+.journey-caption h2{margin:9px 0;font-size:24px}
+.journey-caption p{font-size:12px;color:var(--muted);margin:7px auto;max-width:360px;overflow-wrap:anywhere}
+.journey-scroll{display:block;margin-top:22px;font-size:10px;color:#999}
+@media(max-width:800px){.journey-stage .page-heading{grid-template-columns:1fr;gap:24px}.journey-stage{align-items:start;padding-top:25px}.journey-stage .upload-composition{max-width:350px;margin:auto}.journey-stage .page-heading h1{font-size:32px}.journey-stage .intro{font-size:11px}.journey-stage .upload-composition>p,.journey-stage .upload-composition>small{display:none}.journey-caption{top:calc(50% + 125px)}}
+@media(prefers-reduced-motion:reduce){.upload-journey{height:auto}.journey-stage{position:relative;height:auto;min-height:70vh}.journey-caption{display:none}}
