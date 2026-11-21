@@ -71,6 +71,7 @@ async function runAnalysis(retry=false){
  $('progress-failure').hidden=true;$('progress-spinner').hidden=false;
  $('progress-title').textContent='Соединяем факты';$('stage').hidden=false;
  if(!resumeJob)$('stage').textContent='Подготовка материалов';
+ let failedStage='';
  const deadline=Date.now()+630000;
  try{
   if(!resumeJob){
@@ -81,7 +82,7 @@ async function runAnalysis(retry=false){
    const {response:r,data:j}=await boundedFetch('/api/jobs/'+jobId,{},Math.min(15000,deadline-Date.now()));
    if(!r.ok){if(r.status===404)resumeJob=false;throw Error(j.detail||'Результат недоступен.');}
    $('stage').textContent=j.failed_stage||j.stage;
-   if(j.status==='error'){resumeJob=false;throw Error(j.error);}
+   if(j.status==='error'){resumeJob=false;failedStage=j.failed_stage||j.stage||'';throw Error(j.error);}
    if(j.status==='done'){resumeJob=false;result=j.result;render();view('result');return;}
    await new Promise(resolve=>setTimeout(resolve,1200));
   }
@@ -89,7 +90,7 @@ async function runAnalysis(retry=false){
  }catch(e){
   $('progress-spinner').hidden=true;$('progress-title').textContent='Анализ не завершён';
   $('stage').hidden=true;
-  $('progress-error').textContent=/тайм-аут.*Neural Deep|Neural Deep.*не ответил/i.test(e.message)?'Neural Deep не ответил за отведённое время запроса.':e.message;
+  $('progress-error').textContent=failedStage?`Этап «${failedStage}». ${e.message}`:e.message;
   $('progress-failure').hidden=false;
  }finally{busy=false;$('run').disabled=false;}
 }

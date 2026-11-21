@@ -3,6 +3,7 @@ import copy
 import json
 from concurrent.futures import ThreadPoolExecutor
 import notebook_core as core
+from ai_service import AIReadTimeout
 from quote_checks import locate_quote
 
 SCHEMA=copy.deepcopy(core.MATCH_SCHEMA)
@@ -46,7 +47,15 @@ def match_retrieved(llm,requirements,evidence,retrieved,batch=6,reserved_ids=())
         unique={f['id']:{k:f[k] for k in ('id','source','start','end','text')} for items in contexts.values() for f in items}
         prompt_context={'fragments':list(unique.values()),'candidates':{rid:[f['id'] for f in items] for rid,items in contexts.items()}}
         user='ТРЕБОВАНИЯ:\n'+core._compact_reqs(part)+'\nПРОВЕРЕННЫЕ ДОКАЗАТЕЛЬСТВА:\n'+core._compact_ev(baseline)+'\nФРАГМЕНТЫ ПО ТРЕБОВАНИЯМ:\n'+json.dumps(prompt_context,ensure_ascii=False)
-        return llm.json(SYSTEM,user,SCHEMA,'matching')
+        try:
+            return llm.json(SYSTEM,user,SCHEMA,'matching')
+        except AIReadTimeout:
+            if len(part)==1:
+                raise
+            middle=len(part)//2
+            left=evaluate(part[:middle])
+            right=evaluate(part[middle:])
+            return {'matches':left.get('matches',[])+right.get('matches',[])}
     # Bounded concurrency; consume results in input order for stable evidence IDs.
     with ThreadPoolExecutor(max_workers=2) as workers:
         responses=list(workers.map(evaluate,parts))

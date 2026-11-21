@@ -109,8 +109,13 @@ def analyze(payload, update=lambda s: None):
             requirement_job=workers.submit(core.extract_requirements,llm,proposal)
             document_jobs={source:workers.submit(core.extract_evidence,llm,texts[source],source) for source in sources}
             info=requirement_job.result()
+            if not info['requirements']: raise ValueError('Модель не выделила требований. Уточните Proposal.')
+            try:
+                update('Гибридный поиск и извлечение опыта из документов')
+                retrieved=retriever.search_many(info['requirements'])
+            except Exception:
+                raise AIError('Не удалось выполнить гибридный поиск: ошибка вычисления эмбеддингов. Проверьте локальную модель командой python retrieval.py --prepare через Python проекта.') from None
             blocks={source:future.result() for source,future in document_jobs.items()}
-        if not info['requirements']: raise ValueError('Модель не выделила требований. Уточните Proposal.')
         cv=blocks['CV']
         extra_blocks=[block for source,block in blocks.items() if source!='CV']
         extra=dict(evidence=[e for block in extra_blocks for e in block['evidence']],claimed_metrics=[m for block in extra_blocks for m in block['claimed_metrics']])
@@ -123,11 +128,6 @@ def analyze(payload, update=lambda s: None):
                 if fragment['source']==evidence['source'] and locate_quote(evidence['quote'],fragment['text'])[1]!='not_found':
                     evidence.update(fragment_id=fragment['id'],source_start=fragment['start'],source_end=fragment['end'],context=fragment['text'])
                     break
-        try:
-            update('Гибридный поиск: смысл и научные термины')
-            retrieved=retriever.search_many(info['requirements'])
-        except Exception:
-            raise AIError('Не удалось выполнить гибридный поиск: ошибка вычисления эмбеддингов. Проверьте локальную модель командой python retrieval.py --prepare через Python проекта.') from None
         update('Оценка найденного контекста по каждому требованию')
         matrix,new_ev=match_retrieved(llm,info['requirements'],verified_ev,retrieved,reserved_ids={e['id'] for e in ev})
         ev+= [e for e in new_ev if e['id'] not in {item['id'] for item in ev}]

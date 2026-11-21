@@ -12,9 +12,13 @@ DEFAULT_MODEL='qwen3.6-35b-a3b'
 REQUEST_TIMEOUT=180
 ANALYSIS_TIMEOUT=600
 CHECK_TIMEOUT=30
+MATCH_TIMEOUT=90
 logger=logging.getLogger(__name__)
 
 class AIError(Exception):
+    pass
+
+class AIReadTimeout(AIError):
     pass
 
 def safe_error(exc):
@@ -65,7 +69,7 @@ class CheckedLLM:
             if fmt: kwargs['response_format']=fmt
             remaining=self.deadline-time.monotonic()
             if remaining<=0: raise AIError(deadline_error)
-            kwargs['timeout']=min(REQUEST_TIMEOUT,remaining)
+            kwargs['timeout']=min(MATCH_TIMEOUT if name=='matching' else REQUEST_TIMEOUT,remaining)
             started=time.monotonic()
             format_name=fmt['type'] if fmt else 'text'
             try:
@@ -83,7 +87,8 @@ class CheckedLLM:
                 logger.warning('AI request failed: step=%s format=%s elapsed=%.1fs input_chars=%d error=%s',
                                name,format_name,elapsed,len(user),type(exc).__name__)
                 detail=f'Формат: {format_name}; ожидание: {elapsed:.0f} с; вход: {len(user)} символов.'
-                raise AIError(safe_error(exc)+' '+detail) from None
+                error_type=AIReadTimeout if isinstance(exc,openai.APITimeoutError) and isinstance(exc.__cause__,httpx.ReadTimeout) else AIError
+                raise error_type(safe_error(exc)+' '+detail) from None
             if r.choices[0].finish_reason=='length':
                 if name=='connection_test':
                     raise AIError('Соединение с Neural Deep установлено, но модель исчерпала лимит ответа короткой проверки. Проверка JSON не завершена; документы в этом запросе не отправлялись.')

@@ -156,3 +156,23 @@ def test_proposal_self_description_and_cv_mention_do_not_confirm_work(status):
     assert row['evidence_ids']==['E1','E2']
     assert not row['confirmed_part']
     assert 'только в Proposal' in row['auto_check']
+
+
+def test_read_timeout_splits_only_the_failed_batch():
+    import json
+    from ai_service import AIReadTimeout
+    requirements=[{**req(),'id':f'R{i}'} for i in range(1,5)]
+    retrieved={r['id']:results()['R1'] for r in requirements}
+    calls=[]
+
+    class LLM:
+        def json(self,system,user,*args):
+            ids=list(json.loads(user.split('ФРАГМЕНТЫ ПО ТРЕБОВАНИЯМ:\n')[1])['candidates'])
+            calls.append(ids)
+            if len(ids)>2:
+                raise AIReadTimeout('Read timeout')
+            return {'matches':[dict(req_id=rid,status=core.STATUSES[2],evidence_ids=[],rationale='Нет опыта.',question='') for rid in ids]}
+
+    matrix,_=match_retrieved(LLM(),requirements,[],retrieved)
+    assert calls==[['R1','R2','R3','R4'],['R1','R2'],['R3','R4']]
+    assert [row['req_id'] for row in matrix]==['R1','R2','R3','R4']
