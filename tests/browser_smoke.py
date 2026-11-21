@@ -25,7 +25,7 @@ with sync_playwright() as p:
     page.locator(f'label[for="{target}-file"]').click()
    chooser.value.set_files({'name':target+'.txt','mimeType':'text/plain','buffer':f'Научный проект Python. {target} {width}'.encode()})
    page.wait_for_function("([target,width])=>document.getElementById(target).value.endsWith(String(width))",arg=[target,width])
-   assert page.locator('#'+target).is_visible()
+   assert page.locator('#'+target).is_hidden()
  page.set_viewport_size({'width':1440,'height':1080})
 
  page.click('#demo');page.locator('#application').evaluate('(el,value)=>el.value=value','Научный проект: медицинские изображения на Python и PyTorch. https://example.org/publications');page.click('#run');page.wait_for_selector('#result-view:not([hidden])')
@@ -48,11 +48,11 @@ with sync_playwright() as p:
  page.select_option('#mode','ai');assert page.locator('#ai-settings').get_attribute('open') is not None
  assert page.locator('#ai-key, #ai-connect').count()==0
  assert page.locator('.doc-card .dropzone').count()==3
- assert page.locator('#cv').is_visible()
+ assert page.locator('#cv').is_hidden()
  assert page.locator('#ai-model option').all_text_contents()==['qwen3.6-35b-a3b','qwen3.8-27b','qwen3.6-fp8']
  page.route('**/api/ai/check',lambda route: route.fulfill(json={'ok':True,'model':'qwen3.8-27b','message':'Проверка прошла'}))
  page.select_option('#ai-model','qwen3.8-27b')
- page.click('#ai-check');page.wait_for_function("document.querySelector('#ai-status').textContent.includes('AI проверен')")
+ page.click('#ai-check');page.wait_for_function("document.querySelector('#ai-option').textContent.includes('qwen3.8-27b')")
  page.select_option('#mode','local')
  page.set_input_files('#cv-file',{'name':'cv.txt','mimeType':'text/plain','buffer':'Python: разработка моделей анализа научных данных.'.encode()})
  page.wait_for_function("document.querySelector('#cv').value.startsWith('Python:')")

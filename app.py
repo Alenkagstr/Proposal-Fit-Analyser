@@ -227,7 +227,7 @@ async def extract(request: Request):
     try:
         with tempfile.TemporaryDirectory() as d:
             p=Path(d)/('document'+suffix); p.write_bytes(raw); text=read_xlsx(p) if suffix=='.xlsx' else core.read_file(str(p))
-        if not text.strip(): raise ValueError('Не найден текст. Для скана сначала выполните OCR или вставьте текст вручную.')
+        if not text.strip(): raise ValueError('Не найден текст. Для скана сначала выполните OCR и загрузите файл с текстовым слоем.')
         if len(text)>120000: raise ValueError('Документ слишком большой: максимум 120 000 символов.')
         return {'text':text,'links':link_inventory({'документ':text})}
     except Exception as e:
