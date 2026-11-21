@@ -33,7 +33,7 @@ SYSTEM=core.MATCH_SYSTEM+'''
 '''
 
 
-def match_retrieved(llm,requirements,evidence,retrieved,batch=4,reserved_ids=()):
+def match_retrieved(llm,requirements,evidence,retrieved,batch=6,reserved_ids=()):
     evidence=list(evidence)
     by_id={e['id']:e for e in evidence}
     output=[]
@@ -94,14 +94,7 @@ def match_retrieved(llm,requirements,evidence,retrieved,batch=4,reserved_ids=())
     for row in checked:
         row.setdefault('confirmed_part','')
         row.setdefault('missing_part','')
-        used=[by_id[i] for i in row['evidence_ids']]
         if row['status']==core.STATUSES[1]:
-            if used and all(e['strength']=='упоминание' for e in used):
-                row['confirmed_part']=row['confirmed_part'] or 'В материалах есть упоминание: '+ '; '.join(e['quote'] for e in used)
-                row['missing_part']=row['missing_part'] or 'Нет описания выполненной работы с применением этого требования: '+row['requirement']
-            elif used and all(e['source']=='Proposal (самоописание)' for e in used):
-                row['confirmed_part']=row['confirmed_part'] or 'Есть самоописание опыта в Proposal.'
-                row['missing_part']=row['missing_part'] or 'Нет отдельного подтверждения этого опыта в CV или заявке.'
             if not row['confirmed_part'].strip() or not row['missing_part'].strip():
                 row['status']=core.STATUSES[3]
                 row['auto_check']='Модель не объяснила, какая часть требования подтверждена и чего конкретно не хватает.'

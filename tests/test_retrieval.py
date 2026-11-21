@@ -57,7 +57,7 @@ def results(text='Применяла GWAS в завершённом исслед
     return search.search_many([req()])
 
 
-@pytest.mark.parametrize('strength,expected',[('проект',core.STATUSES[0]),('упоминание',core.STATUSES[1])])
+@pytest.mark.parametrize('strength,expected',[('проект',core.STATUSES[0]),('упоминание',core.STATUSES[2])])
 def test_retrieved_source_becomes_grounded_evidence(strength,expected):
     retrieved=results()
     class LLM:
@@ -67,7 +67,7 @@ def test_retrieved_source_becomes_grounded_evidence(strength,expected):
     matrix,evidence=match_retrieved(LLM(),[req()],[],retrieved,reserved_ids={'E1'})
     assert matrix[0]['status']==expected
     assert evidence[0]['id']=='E2'
-    assert matrix[0]['evidence_ids']==['E2']
+    assert matrix[0]['evidence_ids']==(['E2'] if strength=='проект' else [])
     assert evidence[0]['context']==retrieved['R1'][0]['text']
     assert evidence[0]['source_start']==0
 
@@ -89,7 +89,8 @@ def test_context_includes_negation_and_future_intent():
             assert text in user and 'отрицания' in system
             return {'matches':[dict(req_id='R1',status=core.STATUSES[1],evidence_ids=[],rationale='План, не выполненная работа.',question='Приведите пример выполненной работы.',supports=[dict(fragment_id='F1',quote=text,strength='упоминание',type='метод',summary_en='Intention')])]}
     matrix,evidence=match_retrieved(LLM(),[req()],[],results(text))
-    assert matrix[0]['status']==core.STATUSES[1]
+    assert matrix[0]['status']==core.STATUSES[2]
+    assert not matrix[0]['evidence_ids']
     assert evidence[0]['quote']==text
 
 
@@ -113,14 +114,14 @@ def test_parallel_batches_keep_all_context_without_repeating_shared_fragments():
  import json,threading
  barrier=threading.Barrier(2)
  requests=[]
- requirements=[{**req(),'id':f'R{i}'} for i in range(1,9)]
+ requirements=[{**req(),'id':f'R{i}'} for i in range(1,13)]
  shared=results()['R1']
  retrieved={r['id']:shared for r in requirements}
  class LLM:
   def json(self,system,user,*args):
    data=json.loads(user.split('ФРАГМЕНТЫ ПО ТРЕБОВАНИЯМ:\n')[1])
    assert len(data['fragments'])==1
-   assert len(data['candidates'])==4
+   assert len(data['candidates'])==6
    assert data['fragments'][0]['text']==shared[0]['text']
    requests.append(data)
    barrier.wait(timeout=5)
@@ -140,3 +141,18 @@ def test_partial_project_evidence_requires_a_specific_gap(gap,expected):
  if gap:
   assert matrix[0]['confirmed_part']=='Выполнен GWAS анализ.'
   assert gap in matrix[0]['question']
+
+
+@pytest.mark.parametrize('status',core.STATUSES[:2])
+def test_proposal_self_description_and_cv_mention_do_not_confirm_work(status):
+    evidence=[
+        dict(id='E1',strength='проект',source='Proposal (самоописание)'),
+        dict(id='E2',strength='упоминание',source='CV'),
+    ]
+    match=dict(req_id='R1',status=status,evidence_ids=['E1','E2'],
+               rationale='Описан опыт.',question='',confirmed_part='GWAS',missing_part='')
+    row=core.check_matches([match],[req()],evidence)[0]
+    assert row['status']==core.STATUSES[3]
+    assert row['evidence_ids']==['E1','E2']
+    assert not row['confirmed_part']
+    assert 'только в Proposal' in row['auto_check']
