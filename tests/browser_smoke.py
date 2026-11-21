@@ -9,26 +9,23 @@ with sync_playwright() as p:
  errors=[];page.on('pageerror',lambda e: errors.append(str(e)))
  page.goto(os.getenv('APP_URL','http://127.0.0.1:8000'));page.wait_for_selector('#demo')
  page.screenshot(path=str(out/'desktop.png'),full_page=True)
- circle=page.locator('label[for="cv-file"]')
- with page.expect_file_chooser(): circle.click()
- circle.hover()
- page.wait_for_timeout(500)
- assert circle.evaluate("el=>getComputedStyle(el,'::before').transform")=='matrix(1, 0, 0, 1, 0, 0)'
-
  for width,height in [(1440,1080),(390,844)]:
   page.set_viewport_size({'width':width,'height':height})
-  controls=page.locator('.upload-circle')
+  controls=page.locator('.doc-card .dropzone')
   boxes=[control.bounding_box() for control in controls.all()]
   assert len(boxes)==3
-  assert max(box['y'] for box in boxes)-min(box['y'] for box in boxes)<2
-  assert abs(boxes[0]['x']+boxes[-1]['x']+boxes[-1]['width']-width)<2
+  assert all(box['width']>box['height'] for box in boxes)
+  if width>1000:
+   assert boxes[0]['x']<boxes[1]['x']<boxes[2]['x']
+  else:
+   assert boxes[0]['y']<boxes[1]['y']<boxes[2]['y']
   assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
   for target in ('cv','application','proposal'):
    with page.expect_file_chooser() as chooser:
     page.locator(f'label[for="{target}-file"]').click()
    chooser.value.set_files({'name':target+'.txt','mimeType':'text/plain','buffer':f'Научный проект Python. {target} {width}'.encode()})
    page.wait_for_function("([target,width])=>document.getElementById(target).value.endsWith(String(width))",arg=[target,width])
-   assert page.locator('#'+target).is_hidden()
+   assert page.locator('#'+target).is_visible()
  page.set_viewport_size({'width':1440,'height':1080})
 
  page.click('#demo');page.locator('#application').evaluate('(el,value)=>el.value=value','Научный проект: медицинские изображения на Python и PyTorch. https://example.org/publications');page.click('#run');page.wait_for_selector('#result-view:not([hidden])')
@@ -49,9 +46,9 @@ with sync_playwright() as p:
  assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
  page.screenshot(path=str(out/'mobile.png'),full_page=True)
  page.select_option('#mode','ai');assert page.locator('#ai-settings').get_attribute('open') is not None
- assert page.locator('#ai-key, #ai-connect, .breadcrumb, .local-badge').count()==0
- assert page.locator('.upload-circle').count()==3
- assert page.locator('#cv').is_hidden()
+ assert page.locator('#ai-key, #ai-connect').count()==0
+ assert page.locator('.doc-card .dropzone').count()==3
+ assert page.locator('#cv').is_visible()
  assert page.locator('#ai-model option').all_text_contents()==['qwen3.6-35b-a3b','qwen3.8-27b','qwen3.6-fp8']
  page.route('**/api/ai/check',lambda route: route.fulfill(json={'ok':True,'model':'qwen3.8-27b','message':'Проверка прошла'}))
  page.select_option('#ai-model','qwen3.8-27b')

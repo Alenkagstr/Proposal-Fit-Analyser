@@ -11,7 +11,7 @@ async function boundedFetch(url,options={},timeout=15000){
 const statuses=['подтверждено','частично подтверждено','не найдено в материалах','требует экспертной проверки'];
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function error(message){$('error').textContent=message;$('error').hidden=!message;}
-function view(name){for(const n of ['input','progress','result']) $(n+'-view').hidden=n!==name;$('nav-input').classList.toggle('active',name==='input');$('nav-result').classList.toggle('active',name==='result');error('');window.scrollTo({top:0,behavior:'smooth'});}
+function view(name){for(const n of ['input','progress','result']) $(n+'-view').hidden=n!==name;$('crumb').textContent=name==='input'?'Новый анализ':name==='progress'?'Сопоставление':'Результаты';$('nav-input').classList.toggle('active',name==='input');$('nav-result').classList.toggle('active',name==='result');error('');window.scrollTo({top:0,behavior:'smooth'});}
 function count(id){$(id+'-count').textContent=$(id).value.length.toLocaleString('ru')+' символов';}
 for(const id of ['cv','proposal','application']) $(id).addEventListener('input',()=>count(id));
 async function upload(file,target,label){
