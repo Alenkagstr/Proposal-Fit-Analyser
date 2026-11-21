@@ -29,7 +29,7 @@ $('demo').onclick=()=>{
  $('candidate').value='Анна Петрова · учебный пример';$('mode').value='local';$('extra').value='';$('profiles').value='';$('application').value='';$('mode').dispatchEvent(new Event('change'));error('');
 };
 $('mode').onchange=()=>{
- $('mode-note').textContent=$('mode').value==='ai'?'Требования → опыт CV и заявки → сопоставление → справка. Тексты отправляются Neural Deep.':'Поиск текстовых совпадений без лимита в 100 пунктов. Компетенции проверяет эксперт.';
+ $('mode-note').hidden=$('mode').value==='ai';
  if($('mode').value==='ai'&&!aiReady){$('ai-settings').open=true;$('ai-message').textContent='Задайте ключ в .env, перезапустите сервер и проверьте выбранную модель. Анализ не будет подменён локальным режимом.';}
 };
 function selectModel(model){
