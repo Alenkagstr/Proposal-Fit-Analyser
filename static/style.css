@@ -34,3 +34,6 @@
 }
 .system-recommendation{flex-basis:100%;padding:12px 15px;background:#faf7ff;border-left:3px solid var(--blue)}
 .system-recommendation p{margin:4px 0 0;color:#525a70}
+
+.model-menu{border-top:1px solid var(--line);padding-top:13px;margin-top:13px}
+.model-menu[open] summary{margin-bottom:12px}

@@ -58,10 +58,14 @@ with sync_playwright() as p:
  assert page.locator('#ai-key, #ai-connect').count()==0
  assert page.locator('.doc-card .dropzone').count()==3
  assert page.locator('#cv').is_hidden()
- assert page.locator('#ai-model option').all_text_contents()==['qwen3.6-35b-a3b','qwen3.8-27b','qwen3.6-fp8']
- page.route('**/api/ai/check',lambda route: route.fulfill(json={'ok':True,'model':'qwen3.8-27b','message':'Проверка прошла'}))
- page.select_option('#ai-model','qwen3.8-27b')
- page.click('#ai-check');page.wait_for_function("document.querySelector('#ai-option').textContent.includes('qwen3.8-27b')")
+ assert page.locator('#model-menu #ai-model').is_hidden()
+ page.locator('#model-menu summary').click()
+ assert page.locator('#model-menu #ai-model').is_visible()
+ assert page.locator('#ai-model option').all_text_contents()==['qwen3.6-35b-a3b']
+ assert page.locator('#ai-settings #active-ai-model').inner_text()=='qwen3.6-35b-a3b'
+ page.route('**/api/ai/check',lambda route: route.fulfill(json={'ok':True,'model':'qwen3.6-35b-a3b','message':'Проверка прошла'}))
+ page.select_option('#ai-model','qwen3.6-35b-a3b')
+ page.click('#ai-check');page.wait_for_function("document.querySelector('#ai-message').textContent.includes('Проверка прошла')")
  page.select_option('#mode','local')
  page.set_input_files('#cv-file',{'name':'cv.txt','mimeType':'text/plain','buffer':'Python: разработка моделей анализа научных данных.'.encode()})
  page.wait_for_function("document.querySelector('#cv').value.startsWith('Python:')")

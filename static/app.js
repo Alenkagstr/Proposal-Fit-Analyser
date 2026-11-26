@@ -35,9 +35,13 @@ $('mode').onchange=()=>{
 };
 function selectModel(model){
  const select=$('ai-model');
- if(model&&!Array.from(select.options).some(option=>option.value===model))select.add(new Option(model,model));
- select.value=model||'qwen3.6-35b-a3b';
+ if(model&&model!==select.value)select.replaceChildren(new Option(model,model));
+ showActiveModel();
 }
+function showActiveModel(){
+ $('active-ai-model').textContent=$('ai-model').value;
+}
+$('ai-model').onchange=showActiveModel;
 fetch('/api/health').then(r=>r.json()).then(d=>{
  aiReady=d.ai_available;
  selectModel(d.model);
@@ -57,6 +61,7 @@ async function aiAction(path,payload){
 }
 $('ai-check').onclick=async()=>{
  const data=await aiAction('/api/ai/check',{model:$('ai-model').value});if(!data)return;
+ selectModel(data.model);
  aiReady=true;$('ai-option').textContent='AI-анализ · '+data.model;
  $('mode').value='ai';$('mode').dispatchEvent(new Event('change'));error('');
 };
