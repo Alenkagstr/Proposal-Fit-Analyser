@@ -16,8 +16,8 @@
 .workspace-content main{width:100%;min-width:0}
 .history-sidebar{padding:26px 17px;background:#faf9fc;border-right:1px solid var(--line)}
 .history-sidebar summary{font-weight:700;margin-bottom:16px}
-.history-sidebar label,.candidate-decision label{font-weight:600}
-.history-sidebar select,.candidate-decision select{color:var(--ink);background:white;border:1px solid var(--line);border-radius:4px;padding:8px}
+.history-sidebar label,#history-view label,.candidate-decision label{font-weight:600}
+.history-sidebar select,#history-view select,.candidate-decision select{color:var(--ink);background:white;border:1px solid var(--line);border-radius:4px;padding:8px}
 .history-sidebar select{display:block;width:100%;margin-top:5px}
 #history-message,#decision-message{color:#525a70;font-size:12px}
 #history-list{list-style:none;padding:0;margin:10px 0;display:grid;gap:6px}
@@ -30,10 +30,15 @@
  .history-sidebar{border-right:0;border-bottom:1px solid var(--line);padding:13px 4.5%}
  .history-sidebar summary{margin-bottom:0}
  .history-sidebar details[open] summary{margin-bottom:12px}
- #history-list{max-height:230px;overflow:auto}
 }
 .system-recommendation{flex-basis:100%;padding:12px 15px;background:#faf7ff;border-left:3px solid var(--blue)}
 .system-recommendation p{margin:4px 0 0;color:#525a70}
 
 .model-menu{border-top:1px solid var(--line);padding-top:13px;margin-top:13px}
 .model-menu[open] summary{margin-bottom:12px}
+
+.candidate-nav{display:block;font-weight:700;padding:8px 10px;border-radius:4px}
+.candidate-nav:hover,.candidate-nav[aria-current="page"]{background:#f0e7fa;color:var(--blue)}
+#history-view h1{margin-top:0}
+#history-view select{margin-left:8px}
+#history-list button{padding:14px 16px}

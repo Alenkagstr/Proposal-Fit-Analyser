@@ -11,7 +11,20 @@ async function boundedFetch(url,options={},timeout=15000){
 const statuses=['подтверждено','частично подтверждено','не найдено в материалах','требует экспертной проверки'];
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function error(message){$('error').textContent=message;$('error').hidden=!message;}
-function view(name){for(const n of ['input','progress','result']) $(n+'-view').hidden=n!==name;$('crumb').textContent=name==='input'?'Новый анализ':name==='progress'?'Сопоставление':'Результаты';$('nav-input').classList.toggle('active',name==='input');$('nav-result').classList.toggle('active',name==='result');error('');window.scrollTo({top:0,behavior:'smooth'});}
+function view(name, updateUrl=true){
+ for(const n of ['input','progress','result','history'])$(n+'-view').hidden=n!==name;
+ $('crumb').textContent={input:'Новый анализ',progress:'Сопоставление',result:'Результаты',history:'Кандидаты'}[name];
+ $('nav-input').classList.toggle('active',name==='input');
+ $('nav-result').classList.toggle('active',name==='result');
+ if(name==='history')$('nav-history').setAttribute('aria-current','page');
+ else $('nav-history').removeAttribute('aria-current');
+ if(updateUrl){
+  const url=location.pathname+location.search+(name==='history'?'#candidates':'');
+  if(url!==location.pathname+location.search+location.hash)history.pushState({view:name},'',url);
+ }
+ error('');
+ window.scrollTo({top:0,behavior:'smooth'});
+}
 async function upload(file,target,label){
  if(!file)return;
  error(''); if(file.size>8*1024*1024){error('Максимальный размер файла — 8 МБ.');return;}
@@ -208,5 +221,19 @@ $('candidate-decision').onchange=async ()=>{
   savingDecision=false;
  }
 };
-if(matchMedia('(max-width: 900px)').matches)$('history-menu').open=false;
+$('nav-history').onclick=event=>{
+ event.preventDefault();
+ if(!busy&&!openingHistory){
+  view('history');
+  refreshHistory();
+ }
+};
+addEventListener('popstate',event=>{
+ if(busy)return;
+ if(location.hash==='#candidates'){
+  view('history',false);
+  refreshHistory();
+ }else view(event.state?.view==='result'&&result?'result':'input',false);
+});
+if(location.hash==='#candidates')view('history',false);
 refreshHistory();
