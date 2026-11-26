@@ -1,6 +1,7 @@
 const $=id=>document.getElementById(id);
 let result=null,jobId=null,busy=false,aiReady=false;
-let pendingPayload=null,resumeJob=false;
+let pendingPayload=null,pendingJobId=null,resumeJob=false;
+let decision='pending',historyEntries=[],historyRequest=0,openingHistory=false,savingDecision=false;
 async function boundedFetch(url,options={},timeout=15000){
  const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),timeout);
  try{const response=await fetch(url,{...options,signal:controller.signal});const data=await response.json();return {response,data};}
@@ -60,11 +61,12 @@ $('ai-check').onclick=async()=>{
  $('mode').value='ai';$('mode').dispatchEvent(new Event('change'));error('');
 };
 async function runAnalysis(retry=false){
- if(busy)return;
+ if(busy||openingHistory||savingDecision)return;
  if(!retry){
   if($('mode').value==='ai'&&!aiReady){$('ai-settings').open=true;error('Подключите Neural Deep и нажмите «Проверить AI».');return;}
   if(!$('cv').value.trim()||!$('proposal').value.trim()){error('Загрузите CV и Proposal перед анализом.');return;}
   pendingPayload={};for(const k of ['cv','proposal','application','extra','candidate','profiles','mode'])pendingPayload[k]=$(k).value;
+  if(!pendingPayload.candidate.trim())pendingPayload.candidate=$('cv-file').files[0]?.name.slice(0,150)||'';
   resumeJob=false;
  }
  busy=true;$('run').disabled=true;view('progress');
@@ -76,14 +78,14 @@ async function runAnalysis(retry=false){
  try{
   if(!resumeJob){
    const {response,data}=await boundedFetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(pendingPayload)});
-   if(!response.ok)throw Error(data.detail||'Ошибка анализа.');jobId=data.id;resumeJob=true;
+   if(!response.ok)throw Error(data.detail||'Ошибка анализа.');pendingJobId=data.id;resumeJob=true;
   }
   while(Date.now()<deadline){
-   const {response:r,data:j}=await boundedFetch('/api/jobs/'+jobId,{},Math.min(15000,deadline-Date.now()));
+   const {response:r,data:j}=await boundedFetch('/api/jobs/'+pendingJobId,{},Math.min(15000,deadline-Date.now()));
    if(!r.ok){if(r.status===404)resumeJob=false;throw Error(j.detail||'Результат недоступен.');}
-   $('stage').textContent=j.failed_stage||j.stage;
+   if(j.stage)$('stage').textContent=j.failed_stage||j.stage;
    if(j.status==='error'){resumeJob=false;failedStage=j.failed_stage||j.stage||'';throw Error(j.error);}
-   if(j.status==='done'){resumeJob=false;result=j.result;render();view('result');return;}
+   if(j.status==='done'){resumeJob=false;jobId=pendingJobId;result=j.result;decision=j.decision||'pending';render();view('result');refreshHistory();return;}
    await new Promise(resolve=>setTimeout(resolve,1200));
   }
   throw Error('Превышено время ожидания анализа. Повтор проверит состояние уже запущенного анализа.');
@@ -100,6 +102,12 @@ $('progress-back').onclick=()=>view('input');
 
 function matrix(){const wanted=$('filter').value;const rows=result.matrix.filter(m=>wanted==='all'||m.status===wanted);$('matrix-body').innerHTML=rows.length?rows.map(m=>`<tr><td><small>${esc(m.req_id)} · ${esc(m.type)} · ${esc(m.importance)} · ${esc(m.stated)}</small><strong>${esc(m.requirement)}</strong><div class="source-quote">«${esc(m.quote)}»</div></td><td><span class="status s${statuses.indexOf(m.status)}">${esc(m.status)}</span></td><td>${esc(m.rationale)}${m.status===statuses[1]?`<p><strong>Что подтверждено:</strong> ${esc(m.confirmed_part||m.rationale)}</p><p><strong>Чего не хватает:</strong> ${esc(m.missing_part||m.question)}</p>`:''}${m.auto_check?`<p class="hint">Проверка: ${esc(m.auto_check)}</p>`:''}${m.evidence_ids.length?`<details><summary>Доказательства · ${m.evidence_ids.length}</summary>${m.evidence_ids.map(id=>{const ev=result.evidence.find(x=>x.id===id);return ev?`<blockquote><strong>${esc(ev.id)} · ${esc(ev.source)} · ${esc(ev.strength)}</strong><p>«${esc(ev.quote)}»</p><small>${ev.quote_verified?'Цитата найдена в документе':'Цитату необходимо проверить'}</small>${ev.context?`<details><summary>Исходный фрагмент · ${esc(ev.fragment_id)} · символы ${ev.source_start+1}–${ev.source_end}</summary><p>${esc(ev.context)}</p></details>`:''}</blockquote>`:'';}).join('')}</details>`:'<p class="hint">Подтверждение в материалах не найдено</p>'}</td></tr>`).join(''):'<tr><td colspan="3">Нет требований с выбранным статусом.</td></tr>';}
 function render(){
+ const recommendation=result.recommendation;
+ $('recommendation').textContent=recommendation?'Рекомендация системы · '+decisionLabels[recommendation.decision]:'Рекомендация системы · Рассмотреть';
+ $('recommendation-reason').textContent=recommendation?.reason||'Для этой записи рекомендация не была рассчитана.';
+ $('candidate-decision').value=decision;
+ $('decision-message').textContent='';
+ drawHistory();
  $('nav-result').disabled=false;$('result-candidate').textContent=result.candidate+' · '+result.matrix.length+' требований';
  $('analysis-notice').hidden=result.mode!=='local';
  $('analysis-notice').textContent=result.mode==='local'?'Предварительный режим без AI: показаны совпадения слов. Все выводы требуют экспертной проверки; отсутствие совпадений не означает отсутствие опыта.':'';
@@ -115,4 +123,85 @@ function render(){
 function tab(name){for(const n of ['matrix','risks','report','sources'])$(n+'-panel').hidden=n!==name;for(const b of document.querySelectorAll('[data-tab]')){b.classList.toggle('selected',b.dataset.tab===name);b.setAttribute('aria-selected',String(b.dataset.tab===name));} $('filter').hidden=name!=='matrix';}
 for(const b of document.querySelectorAll('[data-tab]'))b.onclick=()=>tab(b.dataset.tab);
 $('filter').onchange=matrix;$('back').onclick=()=>view('input');$('nav-input').onclick=()=>{if(!busy)view('input');};$('nav-result').onclick=()=>{if(result&&!busy)view('result');};
-$('delete').onclick=async()=>{try{const r=await fetch('/api/jobs/'+jobId,{method:'DELETE'});if(!r.ok)throw Error('Не удалось удалить анализ.');result=null;jobId=null;$('nav-result').disabled=true;for(const id of ['cv','proposal','application','extra','candidate','profiles'])$(id).value='';for(const id of ['cv','proposal','application']){$(id+'-file').value='';$(id+'-file').closest('label').classList.remove('loaded');$(id+'-status').textContent=id==='application'?'Необязательно':'Обязательный документ';}for(const id of ['matrix-body','risks-panel','report-text','sources-panel','stats'])$(id).textContent='';view('input');}catch(e){error(e.message);}};
+$('delete').onclick=async()=>{if(busy||openingHistory||savingDecision)return;openingHistory=true;try{const r=await fetch('/api/jobs/'+jobId,{method:'DELETE'});if(!r.ok)throw Error('Не удалось удалить анализ.');result=null;jobId=null;$('nav-result').disabled=true;for(const id of ['cv','proposal','application','extra','candidate','profiles'])$(id).value='';for(const id of ['cv','proposal','application']){$(id+'-file').value='';$(id+'-file').closest('label').classList.remove('loaded');$(id+'-status').textContent=id==='application'?'Необязательно':'Обязательный документ';}for(const id of ['matrix-body','risks-panel','report-text','sources-panel','stats'])$(id).textContent='';view('input');refreshHistory();}catch(e){error(e.message);}finally{openingHistory=false;}};
+
+const decisionLabels={pending:'Без решения',shortlisted:'Оставить',review:'Рассмотреть',rejected:'Отклонить'};
+const historyDate=new Intl.DateTimeFormat('ru',{dateStyle:'medium',timeStyle:'short'});
+
+function drawHistory(){
+ const filter=$('history-filter').value;
+ const entries=historyEntries.filter(entry=>filter==='all'||entry.decision===filter);
+ const list=$('history-list');
+ list.replaceChildren();
+ for(const entry of entries){
+  const item=document.createElement('li');
+  const button=document.createElement('button');
+  button.type='button';
+  if(jobId===entry.id)button.setAttribute('aria-current','true');
+  const title=document.createElement('strong');
+  title.textContent=entry.candidate;
+  const details=document.createElement('small');
+  details.textContent=historyDate.format(entry.created*1000)+' · '+decisionLabels[entry.decision];
+  button.append(title,details);
+  button.onclick=()=>openHistory(entry.id);
+  item.append(button);
+  list.append(item);
+ }
+ $('history-message').textContent=entries.length?'':filter==='all'?'Завершённых анализов пока нет.':'В этой категории пока нет анализов.';
+}
+
+async function refreshHistory(){
+ const request=++historyRequest;
+ try{
+  const {response,data}=await boundedFetch('/api/history');
+  if(!response.ok)throw Error('Не удалось загрузить историю.');
+  if(request!==historyRequest)return;
+  historyEntries=data;
+  drawHistory();
+ }catch(e){
+  if(request===historyRequest)$('history-message').textContent='Не удалось загрузить историю.';
+ }
+}
+
+async function openHistory(id){
+ if(busy||openingHistory||savingDecision)return;
+ openingHistory=true;
+ try{
+  const {response,data}=await boundedFetch('/api/jobs/'+id);
+  if(!response.ok||!data.result)throw Error(data.detail||'Не удалось открыть анализ.');
+  jobId=id;
+  result=data.result;
+  decision=data.decision||'pending';
+  render();
+  view('result');
+ }catch(e){error(e.message);}
+ finally{openingHistory=false;}
+}
+
+$('history-filter').onchange=drawHistory;
+$('candidate-decision').onchange=async ()=>{
+ if(!jobId||busy||openingHistory||savingDecision){
+  $('candidate-decision').value=decision;
+  return;
+ }
+ savingDecision=true;
+ const field=$('candidate-decision');
+ field.disabled=true;
+ try{
+  const {response,data}=await boundedFetch('/api/history/'+jobId,{
+   method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({decision:field.value})
+  });
+  if(!response.ok)throw Error(data.detail||'Не удалось сохранить решение.');
+  decision=data.decision;
+  $('decision-message').textContent='Решение сохранено.';
+  refreshHistory();
+ }catch(e){
+  field.value=decision;
+  $('decision-message').textContent=e.message;
+ }finally{
+  field.disabled=false;
+  savingDecision=false;
+ }
+};
+if(matchMedia('(max-width: 900px)').matches)$('history-menu').open=false;
+refreshHistory();

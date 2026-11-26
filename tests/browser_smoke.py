@@ -30,6 +30,15 @@ with sync_playwright() as p:
 
  page.click('#demo');page.locator('#application').evaluate('(el,value)=>el.value=value','Научный проект: медицинские изображения на Python и PyTorch. https://example.org/publications');page.click('#run');page.wait_for_selector('#result-view:not([hidden])')
  local_result=page.evaluate('result')
+ assert 'Рассмотреть' in page.locator('#recommendation').inner_text()
+ page.select_option('#candidate-decision','shortlisted')
+ page.wait_for_function("document.querySelector('#decision-message').textContent.includes('сохранено')")
+ page.select_option('#history-filter','shortlisted')
+ page.click('#back')
+ page.locator('#history-list button').filter(has_text='Анна Петрова').first.click()
+ page.wait_for_selector('#result-view:not([hidden])')
+ assert page.locator('#candidate-decision').input_value()=='shortlisted'
+ page.select_option('#history-filter','all')
  assert page.locator('#matrix-body tr').count()==6
  page.locator('#matrix-body details').first.locator('summary').click()
  assert page.locator('blockquote').first.is_visible()

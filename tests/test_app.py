@@ -8,7 +8,8 @@ client=TestClient(app.app)
 PAYLOAD=dict(cv='Python и PyTorch: проект сегментации медицинских изображений в 2024 году.\nСтатистический анализ результатов проекта.',proposal='Метод: сегментация медицинских изображений на Python и PyTorch.\nРесурс: доступ к лаборатории и GPU.\nЭтап: валидация за 12 месяцев.',mode='local',candidate='C01')
 
 @pytest.fixture(autouse=True)
-def local_search_without_model_download(monkeypatch):
+def local_search_without_model_download(monkeypatch,tmp_path):
+ monkeypatch.setattr(app.history,'DATABASE',tmp_path/'history.sqlite3')
  from retrieval import HybridRetriever
  class Encoder:
   def passage_embed(self,texts,**kwargs):return [[1.,float(len(t)%7+1)] for t in texts]
@@ -407,3 +408,30 @@ def test_embedding_failure_is_explicit_and_does_not_call_provider(monkeypatch):
  with pytest.raises(app.AIError,match='embedding-модель') as caught:
   app.analyze({**PAYLOAD,'mode':'ai'})
  assert 'private-detail' not in str(caught.value)
+
+
+def test_history_stores_recommendation_and_expert_decision():
+ ident=client.post('/api/analyze',json=PAYLOAD).json()['id']
+ completed=wait_result(ident)
+ assert completed['result']['recommendation']['decision']=='review'
+ assert completed['decision']=='pending'
+ assert client.patch('/api/history/'+ident,json={'decision':'invalid'}).status_code==422
+ assert client.patch('/api/history/'+ident,json={'decision':'shortlisted'}).json()=={'decision':'shortlisted'}
+ assert client.get('/api/history').json()==[
+  dict(id=ident,candidate='C01',decision='shortlisted',created=completed['created'])
+ ]
+ assert client.get('/api/jobs/'+ident).json()['decision']=='shortlisted'
+ assert client.get('/api/jobs/'+ident+'/export/json').json()==completed['result']
+ assert client.delete('/api/jobs/'+ident).status_code==200
+ assert client.get('/api/history').json()==[]
+ assert client.get('/api/jobs/'+ident).status_code==404
+
+
+@pytest.mark.parametrize('indices,is_ai,expected',[
+ ([0,0],True,'shortlisted'),([2,2],True,'rejected'),([0,2],True,'review'),
+ ([2,3],True,'review'),([2,2],False,'review'),([],True,'review'),
+])
+def test_recommendation_uses_key_requirements(indices,is_ai,expected):
+ matrix=[dict(status=app.STATUSES[index],importance='ключевое') for index in indices]
+ matrix.append(dict(status=app.STATUSES[1],importance='желательное'))
+ assert app.recommend(matrix,is_ai)['decision']==expected

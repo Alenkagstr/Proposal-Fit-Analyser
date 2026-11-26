@@ -5,3 +5,4 @@ __pycache__/
 *.log
 .test-artifacts/
 .model-cache/
+.analysis-history.sqlite3*

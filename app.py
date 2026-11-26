@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from openpyxl import Workbook
 import notebook_core as core
+import history
 
 ROOT = Path(__file__).parent
 app = FastAPI(title='Proposal Fit Analyser')
@@ -89,6 +90,22 @@ def verify_quotes(info, evidence, matrix, texts, proposal):
             m['question']=m.get('question') or 'Уточните исходный фрагмент и подтверждение этого требования.'
 
 
+def recommend(matrix, ai_mode):
+    if not ai_mode:
+        return dict(decision='review', reason='Предварительный анализ оценивает совпадения слов. Нужна оценка эксперта.')
+    key = [row for row in matrix if row['importance'] == 'ключевое']
+    if not key:
+        return dict(decision='review', reason='В матрице нет ключевых требований для оценки.')
+    confirmed = sum(row['status'] == STATUSES[0] for row in key)
+    missing = sum(row['status'] == STATUSES[2] for row in key)
+    summary = f'Подтверждено ключевых требований: {confirmed} из {len(key)}. Без подтверждения в материалах: {missing}.'
+    if confirmed == len(key):
+        return dict(decision='shortlisted', reason=summary)
+    if missing == len(key):
+        return dict(decision='rejected', reason=summary + ' Рекомендация основана на предоставленных документах.')
+    return dict(decision='review', reason=summary + ' Проверьте остальные ключевые требования в матрице.')
+
+
 def analyze(payload, update=lambda s: None):
     started=time.monotonic()
     proposal=payload['proposal']; texts={'CV':payload['cv']}
@@ -146,7 +163,7 @@ def analyze(payload, update=lambda s: None):
     report=f'> Режим: {mode}\n\n'+report
     if source_links:
         report+='\n\n## Ссылки из материалов\n\n'+'\n'.join(f"- {x['type']}: {x['url']} (источник: {', '.join(x['sources'])}; содержимое не загружалось)" for x in source_links)
-    return dict(duration_seconds=round(time.monotonic()-started,2),retrieval_method={'name':'multilingual embeddings + BM25 + RRF','embedding_model':EMBEDDING_MODEL,'top_k':6,'fragment_count':len(retriever.fragments)} if payload['mode']=='ai' else None,source_links=source_links,candidate=payload.get('candidate') or 'Кандидат',mode=payload['mode'],requirements=info,evidence=ev,matrix=matrix,risks=rs,profile=profile,report=report,usage=usage)
+    return dict(recommendation=recommend(matrix,payload['mode']=='ai'),duration_seconds=round(time.monotonic()-started,2),retrieval_method={'name':'multilingual embeddings + BM25 + RRF','embedding_model':EMBEDDING_MODEL,'top_k':6,'fragment_count':len(retriever.fragments)} if payload['mode']=='ai' else None,source_links=source_links,candidate=payload.get('candidate') or 'Кандидат',mode=payload['mode'],requirements=info,evidence=ev,matrix=matrix,risks=rs,profile=profile,report=report,usage=usage)
 
 @app.get('/')
 def index(): return FileResponse(ROOT/'static/index.html',headers={'Cache-Control':'no-cache'})
@@ -253,22 +270,49 @@ async def start(request: Request):
     def run():
         try:
             result=analyze(p,lambda s: jobs[ident].update(stage=s))
-            jobs[ident].update(status='done',result=result)
+            history.save(ident,jobs[ident]['created'],result)
+            with lock:
+                jobs.pop(ident)
         except Exception as e:
             msg=str(e) if isinstance(e,ValueError) else safe_error(e)
             jobs[ident].update(status='error',error=msg,failed_stage=jobs[ident]['stage'])
     pool.submit(run)
     return {'id':ident}
 
+@app.get('/api/history')
+def analysis_history():
+    return history.entries()
+
+
+@app.patch('/api/history/{ident}')
+def update_decision(ident: str, payload: dict):
+    decision = payload.get('decision')
+    if not isinstance(decision, str) or decision not in history.DECISIONS:
+        raise HTTPException(422, 'Выберите допустимое решение.')
+    if not history.decide(ident, decision):
+        raise HTTPException(404, 'Анализ не найден или удалён.')
+    return {'decision': decision}
+
+
 @app.get('/api/jobs/{ident}')
 def job(ident:str):
-    if ident not in jobs: raise HTTPException(404,'Анализ не найден или удалён.')
-    return jobs[ident]
+    with lock:
+        active = jobs.get(ident)
+        if active:
+            return dict(active)
+    archived = history.get(ident)
+    if archived is None:
+        raise HTTPException(404,'Анализ не найден или удалён.')
+    return archived
 
 @app.delete('/api/jobs/{ident}')
 def delete(ident:str):
-    if ident in jobs and jobs[ident]['status']=='running': raise HTTPException(409,'Дождитесь завершения анализа.')
-    jobs.pop(ident,None); return {'ok':True}
+    with lock:
+        if ident in jobs and jobs[ident]['status']=='running':
+            raise HTTPException(409,'Дождитесь завершения анализа.')
+        history.remove(ident)
+        jobs.pop(ident,None)
+    return {'ok':True}
 
 @app.get('/api/jobs/{ident}/export/{fmt}')
 def export(ident:str,fmt:str):
